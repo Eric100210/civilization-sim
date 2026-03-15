@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 from perlin_noise import PerlinNoise
 import random
 import math
+from scipy.ndimage import distance_transform_edt
 
 WIDTH = 300
 HEIGHT = 200
@@ -58,18 +59,15 @@ class World:
         noise3 = PerlinNoise(octaves=12, seed=seed)
         noise4 = PerlinNoise(octaves=24, seed=seed)
         return (noise1, noise2, noise3, noise4)
-        
-    def distance_to_water(self, x, y):
-        min_dist = 999
-        for dx in range(-10, 11):
-            for dy in range(-10, 11):
-                nx = x + dx
-                ny = y + dy
-                if 0 <= nx < self.width and 0 <= ny < self.height:
-                    if self.tiles[nx][ny].elevation < 0:
-                        dist = (dx**2 + dy**2) ** 0.5
-                        min_dist = min(min_dist, dist)
-        return min_dist
+
+    def compute_distance_to_water(self):
+        water_mask = np.zeros((self.width, self.height), dtype=bool)
+        for x in range(self.width):
+            for y in range(self.height):
+                water_mask[x, y] = self.tiles[x][y].elevation < 0
+
+        # distance Euclidienne
+        self.distance_map = distance_transform_edt(~water_mask)
     
     def elevation(self):
         noise1 = PerlinNoise(octaves=3, seed=self.seed)
@@ -116,12 +114,14 @@ class World:
 
     def humidity(self):
         humidity_seeds = self.noises(self.humidity_seed)
+        if not hasattr(self, "distance_map"):
+            self.compute_distance_to_water()
         for y in range(self.height):
             for x in range(self.width):
 
                 tile = self.tiles[x][y]
 
-                distance = self.distance_to_water(x, y)
+                distance = self.distance_map[x, y]
 
                 water_effect = math.exp(-distance*0.2)
 
@@ -149,6 +149,7 @@ class World:
     def generate(self):
         self.elevation()
         self.add_mountains()
+        self.compute_distance_to_water()
         self.humidity()
         self.temperature()
         self.compute_biomes()
@@ -170,7 +171,6 @@ class World:
 
 world = World(WIDTH, HEIGHT)
 world.generate()
-
 
 
 plt.imshow(world.biome_map())

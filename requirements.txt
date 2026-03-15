@@ -3,3 +3,4 @@ numpy
 matplotlib
 random
 math
+scipy.ndimage
