@@ -31,12 +31,12 @@ class Tile:
         if self.elevation < 0:
             return "ocean"
 
-        if self.elevation > 0.45:
+        if self.elevation > 0.4:
             if self.temperature < 0:
                 return "snow"
             return "mountains"
 
-        if self.temperature > 0.7 and self.humidity < 0.1:
+        if self.temperature > 0.7 and self.humidity < 0.15:
             return "desert"
 
         return "plains"
@@ -48,6 +48,7 @@ class World:
         self.width = width
         self.height = height
         self.seed = seed if seed is not None else random.randint(0, 100000)
+        self.continent_noise = PerlinNoise(octaves=2, seed = self.seed + 1000)
         self.humidity_seed = random.randint(0,100000)
         self.tiles = [[None for _ in range(height)] for _ in range(width)]
         
@@ -71,18 +72,47 @@ class World:
         return min_dist
     
     def elevation(self):
-        elevation_seeds = self.noises(self.seed)
+        noise1 = PerlinNoise(octaves=3, seed=self.seed)
+        noise2 = PerlinNoise(octaves=3, seed=self.seed+1)
+        noise3 = PerlinNoise(octaves=3, seed=self.seed+2)
+
         for y in range(self.height):
             for x in range(self.width):
 
-                elevation = elevation_seeds[0]([x/self.width, y/self.height])
-                elevation += 0.5 * elevation_seeds[1]([x/self.width, y/self.height])
-                elevation += 0.25 * elevation_seeds[2]([x/self.width, y/self.height])
-                elevation += 0.125 * elevation_seeds[3]([x/self.width, y/self.height])
-                elevation += 0.1
+                nx = x / self.width
+                ny = y / self.height
+
+                # continents (très basse fréquence)
+                continent = self.continent_noise([nx*0.8, ny*0.8])
+
+                # relief principal
+                elevation = noise1([nx*2, ny*2])
+
+                # détails
+                elevation += 0.5 * noise2([nx*4, ny*4])
+                elevation += 0.25 * noise3([nx*8, ny*8])
+
+                # combinaison
+                elevation = elevation * 0.75 + continent + 0.05
 
                 tile = Tile(elevation)
                 self.tiles[x][y] = tile
+
+    def add_mountains(self):
+        ridge_noise = PerlinNoise(octaves=1, seed=self.seed + 100)
+
+        for y in range(self.height):
+            for x in range(self.width):
+                nx = x / self.width
+                ny = y / self.height
+                tile = self.tiles[x][y]
+
+                if tile.elevation > 0:
+                    val = ridge_noise([nx*2, ny*2])
+                    ridge = 1 - abs(val)
+
+                    if ridge > 0.8:
+                        tile.elevation += (ridge - 0.8) * 0.8
 
     def humidity(self):
         humidity_seeds = self.noises(self.humidity_seed)
@@ -118,6 +148,7 @@ class World:
 
     def generate(self):
         self.elevation()
+        self.add_mountains()
         self.humidity()
         self.temperature()
         self.compute_biomes()
