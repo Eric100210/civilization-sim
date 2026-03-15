@@ -20,11 +20,11 @@ colors = {
 
 class Tile:
 
-    def __init__(self, elevation, temperature, humidity):
+    def __init__(self, elevation, temperature = None, humidity = None):
         self.elevation = elevation
         self.temperature = temperature
         self.humidity = humidity
-        self.biome = self.compute_biome()
+        self.biome = None
 
     def compute_biome(self):
 
@@ -50,26 +50,28 @@ class World:
         self.seed = seed if seed is not None else random.randint(0, 100000)
         self.humidity_seed = random.randint(0,100000)
         self.tiles = [[None for _ in range(height)] for _ in range(width)]
-
-    def wind_direction(y, height):
-        latitude = y / height
-        if latitude < 0.33:
-            return 1   # vent vers l'est
-        elif latitude < 0.66:
-            return -1  # vent vers l'ouest
-        else:
-            return 1
-
+        
     def noises(self, seed):
         noise1 = PerlinNoise(octaves=3, seed=seed)
         noise2 = PerlinNoise(octaves=6, seed=seed)
         noise3 = PerlinNoise(octaves=12, seed=seed)
         noise4 = PerlinNoise(octaves=24, seed=seed)
         return (noise1, noise2, noise3, noise4)
-
-    def generate(self):
+        
+    def distance_to_water(self, x, y):
+        min_dist = 999
+        for dx in range(-10, 11):
+            for dy in range(-10, 11):
+                nx = x + dx
+                ny = y + dy
+                if 0 <= nx < self.width and 0 <= ny < self.height:
+                    if self.tiles[nx][ny].elevation < 0:
+                        dist = (dx**2 + dy**2) ** 0.5
+                        min_dist = min(min_dist, dist)
+        return min_dist
+    
+    def elevation(self):
         elevation_seeds = self.noises(self.seed)
-        humidity_seeds = self.noises(self.humidity_seed)
         for y in range(self.height):
             for x in range(self.width):
 
@@ -79,20 +81,46 @@ class World:
                 elevation += 0.125 * elevation_seeds[3]([x/self.width, y/self.height])
                 elevation += 0.1
 
-                temperature = 1 - abs(elevation * 1.8)
-
-                humidity = humidity_seeds[0]([x/self.width, y/self.height])
-                humidity += 0.5 * humidity_seeds[1]([x/self.width, y/self.height])
-                humidity += 0.25 * humidity_seeds[2]([x/self.width, y/self.height])
-                humidity += 0.125 * humidity_seeds[3]([x/self.width, y/self.height])
-
-                humidity = humidity * (1 - elevation)
-
-                if elevation < 0.1:
-                    humidity += 0.6
-
-                tile = Tile(elevation, temperature, humidity)
+                tile = Tile(elevation)
                 self.tiles[x][y] = tile
+
+    def humidity(self):
+        humidity_seeds = self.noises(self.humidity_seed)
+        for y in range(self.height):
+            for x in range(self.width):
+
+                tile = self.tiles[x][y]
+
+                distance = self.distance_to_water(x, y)
+
+                water_effect = math.exp(-distance*0.2)
+
+                humidity_noise = humidity_seeds[0]([x/self.width, y/self.height])
+                humidity_noise *= 0.15
+
+                humidity = humidity_noise + water_effect
+                humidity = max(0, min(1, humidity))
+
+                tile.humidity = humidity
+
+    def temperature(self):
+        for y in range(self.height):
+            for x in range(self.width):
+                tile = self.tiles[x][y]
+                temperature = 1 - abs(tile.elevation * 1.8)
+                tile.temperature = temperature
+        
+    def compute_biomes(self):
+        for y in range(self.height):
+            for x in range(self.width):
+                tile = self.tiles[x][y]
+                tile.biome = tile.compute_biome()
+
+    def generate(self):
+        self.elevation()
+        self.humidity()
+        self.temperature()
+        self.compute_biomes()
 
     def biome_map(self):
 
