@@ -1,7 +1,7 @@
 import random
 import numpy as np
 import math
-from map import World
+from .map import World
 
 
 class Tribe():
@@ -13,6 +13,7 @@ class Tribe():
         self.technology = None
         self.aggressiveness = None
 
-    def generate(self):
-        pass
+    def spawn(self):
+        land = self.world.is_land
+        habitability_map = self.world.habitability_map
 
