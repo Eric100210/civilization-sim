@@ -1,5 +1,6 @@
 import matplotlib.pyplot as plt
-from data import map, tribe
+from data.map import World
+from data.tribe import Tribe
 
 # -------Paramètres de simulation------
 WIDTH = 300
@@ -8,10 +9,9 @@ NB_TRIBES = 3
 
 
 # ------------Simulation---------------
-world = map.World(WIDTH, HEIGHT)
+world = World(WIDTH, HEIGHT)
 world.generate()
-tribes = [tribe.Tribe(world) for _ in range(NB_TRIBES)]
-breakpoint()
+tribes = [Tribe(world) for _ in range(NB_TRIBES)]
 
 plt.imshow(world.biome_map())
 plt.title(f"Generated World (seed={world.seed})")
