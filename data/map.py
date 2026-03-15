@@ -1,12 +1,9 @@
 import numpy as np
-import matplotlib.pyplot as plt
 from perlin_noise import PerlinNoise
 import random
 import math
 from scipy.ndimage import distance_transform_edt
 
-WIDTH = 300
-HEIGHT = 200
 SCALE = 100.0
 
 
@@ -21,13 +18,14 @@ colors = {
 
 class Tile:
 
-    def __init__(self, elevation, temperature = None, humidity = None):
+    def __init__(self, elevation: int, temperature: int | None = None, humidity: int | None = None):
         self.elevation = elevation
         self.temperature = temperature
         self.humidity = humidity
         self.biome = None
+        self.habitability = None
 
-    def compute_biome(self):
+    def compute_biome(self) -> str:
 
         if self.elevation < 0:
             return "ocean"
@@ -41,35 +39,39 @@ class Tile:
             return "desert"
 
         return "plains"
-
+        
 
 class World:
 
-    def __init__(self, width, height, seed=None):
+    def __init__(self, width: int, height: int, seed: int | None = None):
         self.width = width
         self.height = height
         self.seed = seed if seed is not None else random.randint(0, 100000)
         self.continent_noise = PerlinNoise(octaves=2, seed = self.seed + 1000)
         self.humidity_seed = random.randint(0,100000)
         self.tiles = [[None for _ in range(height)] for _ in range(width)]
+        self.distance_map = None
+        self.is_land = None
+        self.is_water = None
         
-    def noises(self, seed):
+    def humidity_noises(self, seed: int) -> tuple[np.ndarray]:
         noise1 = PerlinNoise(octaves=3, seed=seed)
         noise2 = PerlinNoise(octaves=6, seed=seed)
         noise3 = PerlinNoise(octaves=12, seed=seed)
         noise4 = PerlinNoise(octaves=24, seed=seed)
         return (noise1, noise2, noise3, noise4)
 
-    def compute_distance_to_water(self):
+    def compute_distance_to_water(self) -> None:
         water_mask = np.zeros((self.width, self.height), dtype=bool)
         for x in range(self.width):
             for y in range(self.height):
                 water_mask[x, y] = self.tiles[x][y].elevation < 0
 
-        # distance Euclidienne
         self.distance_map = distance_transform_edt(~water_mask)
+        self.is_water = self.distance_map == 0
+        self.is_land = self.distance_map > 0
     
-    def elevation(self):
+    def elevation(self) -> None:
         noise1 = PerlinNoise(octaves=3, seed=self.seed)
         noise2 = PerlinNoise(octaves=3, seed=self.seed+1)
         noise3 = PerlinNoise(octaves=3, seed=self.seed+2)
@@ -80,23 +82,22 @@ class World:
                 nx = x / self.width
                 ny = y / self.height
 
-                # continents (très basse fréquence)
+                # continents (low frequency)
                 continent = self.continent_noise([nx*0.8, ny*0.8])
 
-                # relief principal
+                # principal relief
                 elevation = noise1([nx*2, ny*2])
 
-                # détails
+                # details
                 elevation += 0.5 * noise2([nx*4, ny*4])
                 elevation += 0.25 * noise3([nx*8, ny*8])
 
-                # combinaison
                 elevation = elevation * 0.75 + continent + 0.05
 
                 tile = Tile(elevation)
                 self.tiles[x][y] = tile
 
-    def add_mountains(self):
+    def add_mountains(self) -> None:
         ridge_noise = PerlinNoise(octaves=1, seed=self.seed + 100)
 
         for y in range(self.height):
@@ -112,8 +113,8 @@ class World:
                     if ridge > 0.8:
                         tile.elevation += (ridge - 0.8) * 0.8
 
-    def humidity(self):
-        humidity_seeds = self.noises(self.humidity_seed)
+    def humidity(self) -> None:
+        humidity_seeds = self.humidity_noises(self.humidity_seed)
         if not hasattr(self, "distance_map"):
             self.compute_distance_to_water()
         for y in range(self.height):
@@ -133,28 +134,47 @@ class World:
 
                 tile.humidity = humidity
 
-    def temperature(self):
+    def temperature(self) -> None:
         for y in range(self.height):
             for x in range(self.width):
                 tile = self.tiles[x][y]
                 temperature = 1 - abs(tile.elevation * 1.8)
                 tile.temperature = temperature
+
+    def compute_habitability(self) -> None:
+        for y in range(self.height):
+            for x in range(self.width):
+                tile = self.tiles[x][y]
+                if tile.elevation < 0:
+                    return -1
+                score = 0
+                # Water proximity
+                dist = self.distance_map[x, y]
+                score += np.exp(-dist * 0.3)
+                # Humidity
+                score += tile.humidity
+                # Temperature
+                score += max(tile.temperature, 0)
+                # Elevation
+                score -= max(tile.elevation, 0) * 0.5
+                tile.habitability = score
         
-    def compute_biomes(self):
+    def compute_biomes(self) -> None:
         for y in range(self.height):
             for x in range(self.width):
                 tile = self.tiles[x][y]
                 tile.biome = tile.compute_biome()
 
-    def generate(self):
+    def generate(self) -> None:
         self.elevation()
         self.add_mountains()
         self.compute_distance_to_water()
         self.humidity()
         self.temperature()
+        self.compute_habitability()
         self.compute_biomes()
 
-    def biome_map(self):
+    def biome_map(self) -> np.ndarray:
 
         img = np.zeros((self.height, self.width, 3))
 
@@ -167,13 +187,3 @@ class World:
                 img[y][x] = [r/255, g/255, b/255]
 
         return img
-
-
-world = World(WIDTH, HEIGHT)
-world.generate()
-
-
-plt.imshow(world.biome_map())
-plt.title(f"Generated World (seed={world.seed})")
-plt.axis("off")
-plt.show()
