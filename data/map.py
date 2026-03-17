@@ -190,7 +190,7 @@ class World:
                 tile.habitability = score
                 self.habitability_map[x][y] = score
 
-    def habitability_local_max(self):
+    def habitability_local_max(self) -> list[tuple[int | float]]:
         hmap = self.habitability_map
 
         # local max in a 5x5 neighborhood
@@ -206,10 +206,9 @@ class World:
 
         return locations     
     
-    def generate_rivers(self, n_sources=20, max_length=800):
+    def generate_rivers(self, n_sources=20, max_length=800) -> None:
         self.river_flow = np.zeros((self.width, self.height))
         
-        # 1️⃣ identify river sources
         mountain_tiles = [(tile.x, tile.y) for row in self.tiles for tile in row if tile.elevation > 0.4]
         sources = random.sample(mountain_tiles, min(n_sources, len(mountain_tiles)))
         
