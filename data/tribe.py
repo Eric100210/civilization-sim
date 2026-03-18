@@ -13,7 +13,11 @@ class Tribe:
         self.technology = None
         self.aggressiveness = None
 
-    def spawn(self):
+    def display_territory(self) -> None:
+        for (x, y) in self.territory:
+            self.world.tiles[x][y].biome = "village"
+
+    def spawn(self) -> tuple[int]:
         # spawn position
         land_positions = np.argwhere(self.world.is_land)
         x, y = random.choice(land_positions)
@@ -24,7 +28,7 @@ class Tribe:
         self.population = np.random.lognormal(mean=3.5 + habit, sigma=0.3)
         return x, y
     
-    def migrate(self):
+    def migrate(self) -> None:
         x, y = next(iter(self.territory))
         habit_map = self.world.habitability_map
         tile = self.world.tiles[x][y]
@@ -41,6 +45,7 @@ class Tribe:
             p = min(1, (best_h - current_habit)*5)
             if random.random() < p:
                 self.territory = {(bx, by)}
+                self.display_territory()
 
     def reproduction(self):
         pass
