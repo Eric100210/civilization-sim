@@ -78,7 +78,15 @@ class World:
         self.elevation_map = [[None for _ in range(height)] for _ in range(width)]
         self.humidity_map = [[None for _ in range(height)] for _ in range(width)]
         self.temperature_map = [[None for _ in range(height)] for _ in range(width)]
-        self.habitability_map = [[None for _ in range(height)] for _ in range(width)]
+        self.habitability_map = [[None for _ in range(self.height)] for _ in range(self.width)]
+    
+    def display_habitability(self):
+        import matplotlib.pyplot as plt
+
+        habit_map = np.array(self.habitability_map).T  # transpose pour correspondre aux axes
+        plt.imshow(habit_map, origin="lower", cmap="magma")
+        plt.colorbar(label="Habitability")
+        plt.show()
         
     def humidity_noises(self, seed: int) -> tuple[np.ndarray]:
         noise1 = PerlinNoise(octaves=3, seed=seed)
@@ -175,21 +183,17 @@ class World:
             for x in range(self.width):
                 tile = self.tiles[x][y]
                 if tile.elevation < 0:
-                    tile.habitability = -1
-                    self.habitability_map[x][y] = -1
-                score = 0
-                # Water proximity
-                dist = self.distance_map[x, y]
-                score += np.exp(-dist * 0.3)
-                score += max(0, tile.river)
-                # Humidity
-                score += 2*(0.6 - tile.humidity)
-                # Temperature (let's say the optimum is 0.6)
-                score += 2*(0.6 - tile.temperature)
-                # Elevation
-                score -= max(tile.elevation, 0) * 0.5
-                tile.habitability = score
-                self.habitability_map[x][y] = score
+                    habit = -1
+                else:
+                    dist = self.distance_map[x, y]
+                    habit = 2*np.exp(-dist*0.1)             # proximité de l'eau
+                    habit += max(0, tile.river)            # rivière
+                    habit += 2*(0.6 - tile.humidity)       # humidité
+                    habit += 2*(0.6 - tile.temperature)    # température
+                    habit -= max(tile.elevation, 0)*0.5    # élévation
+
+                tile.habitability = habit
+                self.habitability_map[x][y] = habit 
 
     def habitability_local_max(self) -> list[tuple[int | float]]:
         hmap = self.habitability_map

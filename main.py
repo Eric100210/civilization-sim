@@ -18,7 +18,7 @@ params = {
 # --- Initialisation ---
 world = World(params["WIDTH"], params["HEIGHT"])
 world.generate()
-
+world.display_habitability()
 tribes = []
 
 for _ in range(params["NB_TRIBES"]):
