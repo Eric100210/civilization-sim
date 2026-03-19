@@ -2,7 +2,7 @@ import numpy as np
 from perlin_noise import PerlinNoise
 import random
 import math
-from scipy.ndimage import distance_transform_edt, maximum_filter
+from scipy.ndimage import distance_transform_edt, maximum_filter, gaussian_filter
 from heapq import heappush, heappop
 
 
@@ -152,21 +152,40 @@ class World:
     def compute_habitability(self) -> None:
         land = self.is_land  # bool (height, width)
 
-        # River contribution: build a (height, width) bool array from tiles
+        # River influence: binary mask blurred into a valley effect.
+        # sigma controls how far the fertility bonus spreads from the river bank.
+        # sigma=2 ≈ 2 tiles radius, peaks at 3.0 on the river itself.
         river_grid = np.zeros((self.height, self.width))
         for x in range(self.width):
             for y in range(self.height):
                 river_grid[y, x] = self.tiles[x][y].river
+        river_influence = gaussian_filter(river_grid, sigma=2) * 3.0
+
+        # Temperature: bell curve centred on 0.5 (≈15°C, optimal for agriculture)
+        temp_score = np.exp(-((self.temperature_map - 0.5) ** 2) / 0.08)
+
+        # Humidity: bell curve centred on 0.4 (moderate — not too dry, not tropical)
+        humidity_score = np.exp(-((self.humidity_map - 0.4) ** 2) / 0.125)
+
+        # Water proximity: gentle decay from ocean/lake shore
+        water_score = np.exp(-self.distance_map * 0.05)
+
+        # Alluvial fertility bonus: flat low land adjacent to a river
+        # (river deltas and floodplains — historically where civilisations begin)
+        alluvial = (self.elevation_map < 0.15) & (river_grid == 1)
+        fertility_bonus = alluvial.astype(float) * 2.0
+
+        # Altitude penalty: non-linear above 0.15
+        altitude_penalty = np.maximum(0, self.elevation_map - 0.15) ** 1.5 * 3.0
 
         habit = np.where(
             land,
-            (
-                2 * np.exp(-self.distance_map * 0.1)
-                + river_grid
-                + 2 * (0.6 - self.humidity_map)
-                + 2 * (0.6 - self.temperature_map)
-                - np.maximum(self.elevation_map, 0) * 0.5
-            ),
+            water_score
+            + temp_score
+            + humidity_score
+            + river_influence
+            + fertility_bonus
+            - altitude_penalty,
             -1.0,
         )
         self.habitability_map = habit
