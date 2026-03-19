@@ -1,6 +1,4 @@
 perlin_noise
 numpy
 matplotlib
-random
-math
-scipy.ndimage
+scipy
