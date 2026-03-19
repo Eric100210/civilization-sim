@@ -3,6 +3,7 @@ from perlin_noise import PerlinNoise
 import random
 import math
 from scipy.ndimage import distance_transform_edt, maximum_filter
+from heapq import heappush, heappop
 
 
 colors = {
@@ -196,7 +197,6 @@ class World:
           - Propagate from low to high: if a land neighbour is lower than the
             current filled surface, raise it just above so water can escape.
         """
-        from heapq import heappush, heappop
 
         filled = np.full_like(elev, np.inf)
         visited = np.zeros((self.height, self.width), dtype=bool)
@@ -210,15 +210,17 @@ class World:
                     visited[y, x] = True
                     heappush(heap, (elev[y, x], y, x))
 
-        dirs = [(-1, -1), (-1, 0), (-1, 1),
-                (0, -1),           (0,  1),
-                (1, -1),  (1, 0),  (1,  1)]
+        dirs = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]
 
         while heap:
             elev_cur, cy, cx = heappop(heap)
             for dy, dx in dirs:
                 ny, nx = cy + dy, cx + dx
-                if 0 <= ny < self.height and 0 <= nx < self.width and not visited[ny, nx]:
+                if (
+                    0 <= ny < self.height
+                    and 0 <= nx < self.width
+                    and not visited[ny, nx]
+                ):
                     visited[ny, nx] = True
                     # Neighbour must be at least as high as current filled surface
                     filled[ny, nx] = max(elev[ny, nx], elev_cur + epsilon)
@@ -242,9 +244,7 @@ class World:
         """
         filled = self._fill_sinks(self.elevation_map)
 
-        dirs = [(-1, -1), (-1, 0), (-1, 1),
-                (0,  -1),          (0,  1),
-                (1,  -1), (1,  0), (1,  1)]
+        dirs = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]
 
         self.river_flow = np.zeros((self.height, self.width))
 
@@ -309,7 +309,7 @@ class World:
                 )
 
     def generate(self, n_rivers: int = 20, river_randomness: float = 0.3) -> None:
-        self.elevation()           # inclut les montagnes (ridge)
+        self.elevation()  # inclut les montagnes (ridge)
         self.compute_distance_to_water()
         self.humidity()
         self.temperature()
