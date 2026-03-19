@@ -40,12 +40,12 @@ class Tile:
     ) -> str:
         if elevation < ELEVATION_SEA:
             return "ocean"
+        if self.river == 1:
+            return "river"
         if elevation > ELEVATION_MOUNTAIN:
             return "snow" if temperature < 0 else "mountains"
         if temperature > TEMP_DESERT and humidity < HUMIDITY_DESERT:
             return "desert"
-        if self.river == 1:
-            return "river"
         return "plains"
 
     def neighbors(self, world: "World") -> list[tuple[int, int]]:
@@ -184,38 +184,117 @@ class World:
         )  # (score, x, y)
         return locations
 
-    def generate_rivers(self, n_sources: int = 20, max_length: int = 800) -> None:
+    def _fill_sinks(self, elev: np.ndarray, epsilon: float = 1e-4) -> np.ndarray:
+        """
+        Fill depressions (sinks) in the elevation map so that every land tile
+        drains to the ocean.  Uses an iterative flood-fill starting from the
+        ocean border.
+
+        Algorithm (simplified Priority-Flood):
+          - Initialise a 'filled' surface equal to elev everywhere.
+          - Ocean tiles are fixed at their real elevation (they are the outlets).
+          - Propagate from low to high: if a land neighbour is lower than the
+            current filled surface, raise it just above so water can escape.
+        """
+        from heapq import heappush, heappop
+
+        filled = np.full_like(elev, np.inf)
+        visited = np.zeros((self.height, self.width), dtype=bool)
+        heap = []  # (filled_elevation, y, x)
+
+        # Seed the heap with every ocean-border tile
+        for y in range(self.height):
+            for x in range(self.width):
+                if elev[y, x] < ELEVATION_SEA:
+                    filled[y, x] = elev[y, x]
+                    visited[y, x] = True
+                    heappush(heap, (elev[y, x], y, x))
+
+        dirs = [(-1, -1), (-1, 0), (-1, 1),
+                (0, -1),           (0,  1),
+                (1, -1),  (1, 0),  (1,  1)]
+
+        while heap:
+            elev_cur, cy, cx = heappop(heap)
+            for dy, dx in dirs:
+                ny, nx = cy + dy, cx + dx
+                if 0 <= ny < self.height and 0 <= nx < self.width and not visited[ny, nx]:
+                    visited[ny, nx] = True
+                    # Neighbour must be at least as high as current filled surface
+                    filled[ny, nx] = max(elev[ny, nx], elev_cur + epsilon)
+                    heappush(heap, (filled[ny, nx], ny, nx))
+
+        return filled
+
+    def generate_rivers(self, n_sources: int = 20, randomness: float = 0.3) -> None:
+        """
+        Organic river generation: stochastic descent on a sink-filled elevation map.
+
+        Each river starts from a random mountain tile and walks downhill to the
+        ocean. At each step, all strictly-downhill neighbours are candidates;
+        they are chosen with probability proportional to (drop ^ (1 - randomness)).
+
+          randomness=0.0 → always pick the steepest neighbour (D8-like, straight lines)
+          randomness=1.0 → uniform random among all downhill neighbours (very wiggly)
+          randomness=0.3 → mostly follows the slope, with organic meanders (default)
+
+        Sink-filling guarantees every path reaches the ocean — no river gets stuck.
+        """
+        filled = self._fill_sinks(self.elevation_map)
+
+        dirs = [(-1, -1), (-1, 0), (-1, 1),
+                (0,  -1),          (0,  1),
+                (1,  -1), (1,  0), (1,  1)]
+
         self.river_flow = np.zeros((self.height, self.width))
 
         mountain_tiles = [
-            (tile.x, tile.y)
-            for col in self.tiles
-            for tile in col
-            if self.elevation_map[tile.y, tile.x] > ELEVATION_MOUNTAIN
+            (y, x)
+            for y in range(self.height)
+            for x in range(self.width)
+            if self.elevation_map[y, x] > ELEVATION_MOUNTAIN
         ]
         sources = random.sample(mountain_tiles, min(n_sources, len(mountain_tiles)))
 
-        for sx, sy in sources:
-            x, y = sx, sy
+        for sy, sx in sources:
+            y, x = sy, sx
             path = []
-            for _ in range(max_length):
-                path.append((x, y))
-                if self.elevation_map[y, x] < ELEVATION_SEA:
+
+            while True:
+                path.append((y, x))
+
+                # Stop when we reach the ocean
+                if filled[y, x] < ELEVATION_SEA:
                     break
 
-                neigh_coords = self.tiles[x][y].neighbors(self)
-                candidates = [
-                    (self.elevation_map[ny, nx], nx, ny)
-                    for nx, ny in neigh_coords
-                    if self.elevation_map[ny, nx] <= self.elevation_map[y, x] + 0.02
-                ]
+                # Candidates: strictly downhill neighbours on the filled surface
+                candidates = []
+                for dy, dx in dirs:
+                    ny, nx = y + dy, x + dx
+                    if 0 <= ny < self.height and 0 <= nx < self.width:
+                        drop = filled[y, x] - filled[ny, nx]
+                        if drop > 0:
+                            candidates.append((drop, ny, nx))
+
                 if not candidates:
-                    break
+                    break  # flat peak with no outlet (shouldn't happen after fill)
 
-                candidates.sort()
-                _, x, y = random.choice(candidates[:3])
+                # Weighted random choice: weight = drop^(1 - randomness)
+                # randomness=0 → weight=drop (steepest wins strongly)
+                # randomness=1 → weight=1 (uniform)
+                weights = [d ** (1.0 - randomness) for d, _, _ in candidates]
+                total = sum(weights)
+                r = random.random() * total
+                cumul = 0.0
+                chosen = candidates[-1]
+                for w, (drop, ny, nx) in zip(weights, candidates):
+                    cumul += w
+                    if r <= cumul:
+                        chosen = (drop, ny, nx)
+                        break
+                _, y, x = chosen
 
-            for px, py in path:
+            for py, px in path:
                 self.river_flow[py, px] += 1
                 self.tiles[px][py].river = 1
 
@@ -229,12 +308,12 @@ class World:
                     self.humidity_map[y, x],
                 )
 
-    def generate(self) -> None:
+    def generate(self, n_rivers: int = 20, river_randomness: float = 0.3) -> None:
         self.elevation()           # inclut les montagnes (ridge)
         self.compute_distance_to_water()
         self.humidity()
         self.temperature()
-        self.generate_rivers()
+        self.generate_rivers(n_sources=n_rivers, randomness=river_randomness)
         self.compute_habitability()
         self.compute_biomes()
 

@@ -10,7 +10,9 @@ params = {
     "HEIGHT": 200,
     "NB_TRIBES": 3,
     "NB_YEARS": 1000,
-    "INTERVAL_MS": 50,   # ms between frames — increase to slow down the animation
+    "INTERVAL_MS": 50,          # ms between frames — increase to slow down the animation
+    "N_RIVERS": 20,             # number of river sources spawned in mountains
+    "RIVER_RANDOMNESS": 0.3,    # 0.0 = steepest descent (straight), 1.0 = fully random (wiggly)
 }
 
 
@@ -18,7 +20,7 @@ params = {
 
 # --- Initialisation ---
 world = World(params["WIDTH"], params["HEIGHT"])
-world.generate()
+world.generate(n_rivers=params["N_RIVERS"], river_randomness=params["RIVER_RANDOMNESS"])
 world.display_habitability()
 tribes = []
 
