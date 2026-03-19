@@ -238,6 +238,19 @@ class World:
         self.compute_habitability()
         self.compute_biomes()
 
+    def step(self, year: int, tribes: list) -> None:
+        """
+        Everything that changes on the world map in one year.
+        Called by Simulation.animate() before rendering.
+
+        Future hooks:
+          - climate drift
+          - resource depletion / regeneration
+          - recalculate habitability if resources change
+        """
+        for tribe in tribes:
+            tribe.step(year, tribes)
+
     def biome_map(self) -> np.ndarray:
         """Returns RGB image of shape (height, width, 3) ready for imshow."""
         color_array = np.zeros((self.height, self.width, 3))

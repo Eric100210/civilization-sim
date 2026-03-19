@@ -6,10 +6,11 @@ from sim.simulation import Simulation
 
 # -------Paramètres de simulation------
 params = {
-    "WIDTH" : 300,
-    "HEIGHT" : 200,
-    "NB_TRIBES" : 3,
-    "NB_YEARS" : 1000,
+    "WIDTH": 300,
+    "HEIGHT": 200,
+    "NB_TRIBES": 3,
+    "NB_YEARS": 1000,
+    "INTERVAL_MS": 50,   # ms between frames — increase to slow down the animation
 }
 
 
