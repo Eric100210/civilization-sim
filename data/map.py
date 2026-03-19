@@ -4,8 +4,6 @@ import random
 import math
 from scipy.ndimage import distance_transform_edt, maximum_filter
 
-SCALE = 100.0
-
 
 colors = {
     "ocean": (66, 110, 225),
@@ -14,244 +12,225 @@ colors = {
     "mountains": (140, 140, 140),
     "snow": (250, 250, 250),
     "river": (66, 120, 241),
-    "village": (102, 57, 9)
+    "village": (102, 57, 9),
 }
+
+# Biome thresholds
+ELEVATION_SEA = 0.0
+ELEVATION_MOUNTAIN = 0.4
+TEMP_DESERT = 0.7
+HUMIDITY_DESERT = 0.15
 
 
 class Tile:
+    """
+    Lightweight object for biome/river state. Scalar terrain values
+    (elevation, humidity, temperature, habitability) are stored in numpy
+    arrays on World and NOT duplicated here.
+    """
 
-    def __init__(self, x: int, y: int, elevation: int, temperature: int | None = None, humidity: int | None = None):
+    def __init__(self, x: int, y: int):
         self.x = x
         self.y = y
-        self.elevation = elevation
-        self.temperature = temperature
-        self.humidity = humidity
         self.river = 0
         self.biome = None
-        self.habitability = None
 
-    def compute_biome(self) -> str:
-
-        if self.elevation < 0:
+    def compute_biome(
+        self, elevation: float, temperature: float, humidity: float
+    ) -> str:
+        if elevation < ELEVATION_SEA:
             return "ocean"
-
-        if self.elevation > 0.4:
-            if self.temperature < 0:
-                return "snow"
-            return "mountains"
-
-        if self.temperature > 0.7 and self.humidity < 0.15:
+        if elevation > ELEVATION_MOUNTAIN:
+            return "snow" if temperature < 0 else "mountains"
+        if temperature > TEMP_DESERT and humidity < HUMIDITY_DESERT:
             return "desert"
-        
         if self.river == 1:
             return "river"
-
         return "plains"
-    
-    def neighbors(self, world: 'World') -> list[tuple[int,int]]:
-        """
-        Renvoie la liste des coordonnées des 8 voisins valides.
-        """
-        dirs = [(-1,-1), (-1,0), (-1,1),
-                (0,-1),          (0,1),
-                (1,-1),  (1,0),  (1,1)]
+
+    def neighbors(self, world: "World") -> list[tuple[int, int]]:
+        """Returns coordinates of valid 8-neighbours."""
         result = []
-        for dx, dy in dirs:
-            nx, ny = self.x + dx, self.y + dy
-            if 0 <= nx < world.width and 0 <= ny < world.height:
-                result.append((nx, ny))
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                if dx == 0 and dy == 0:
+                    continue
+                nx, ny = self.x + dx, self.y + dy
+                if 0 <= nx < world.width and 0 <= ny < world.height:
+                    result.append((nx, ny))
         return result
-        
+
 
 class World:
+    """
+    All value maps are numpy arrays of shape (height, width), indexed [y, x].
+    self.tiles[x][y] holds Tile objects (indexed [x][y] for convenience).
+    """
 
     def __init__(self, width: int, height: int, seed: int | None = None):
         self.width = width
         self.height = height
         self.seed = seed if seed is not None else random.randint(0, 100000)
-        self.continent_noise = PerlinNoise(octaves=2, seed = self.seed + 1000)
-        self.humidity_seed = random.randint(0,100000)
-        self.tiles = [[None for _ in range(height)] for _ in range(width)]
-        self.distance_map = None
-        self.is_land = None
-        self.is_water = None
-        self.elevation_map = [[None for _ in range(height)] for _ in range(width)]
-        self.humidity_map = [[None for _ in range(height)] for _ in range(width)]
-        self.temperature_map = [[None for _ in range(height)] for _ in range(width)]
-        self.habitability_map = [[None for _ in range(self.height)] for _ in range(self.width)]
-    
-    def display_habitability(self):
+        self.humidity_seed = random.randint(0, 100000)
+
+        # Tile objects grid — kept as list-of-lists indexed [x][y]
+        self.tiles = [[Tile(x, y) for y in range(height)] for x in range(width)]
+
+        # All value maps: shape (height, width), indexed [y, x]
+        self.elevation_map: np.ndarray = np.zeros((height, width))
+        self.humidity_map: np.ndarray = np.zeros((height, width))
+        self.temperature_map: np.ndarray = np.zeros((height, width))
+        self.habitability_map: np.ndarray = np.zeros((height, width))
+        self.river_flow: np.ndarray = np.zeros((height, width))
+        self.distance_map: np.ndarray | None = None
+        self.is_land: np.ndarray | None = None
+        self.is_water: np.ndarray | None = None
+
+    def display_habitability(self) -> None:
         import matplotlib.pyplot as plt
 
-        habit_map = np.array(self.habitability_map).T  # transpose pour correspondre aux axes
-        plt.imshow(habit_map, origin="lower", cmap="magma")
+        # habitability_map is already (height, width) — no transpose needed
+        plt.imshow(self.habitability_map, origin="lower", cmap="magma")
         plt.colorbar(label="Habitability")
         plt.show()
-        
-    def humidity_noises(self, seed: int) -> tuple[np.ndarray]:
-        noise1 = PerlinNoise(octaves=3, seed=seed)
-        noise2 = PerlinNoise(octaves=6, seed=seed)
-        noise3 = PerlinNoise(octaves=12, seed=seed)
-        noise4 = PerlinNoise(octaves=24, seed=seed)
-        return (noise1, noise2, noise3, noise4)
+
+    def elevation(self) -> None:
+        """Single pass over the grid to compute all elevation noise layers at once."""
+        continent_noise = PerlinNoise(octaves=2, seed=self.seed + 1000)
+        noise1 = PerlinNoise(octaves=3, seed=self.seed)
+        noise2 = PerlinNoise(octaves=3, seed=self.seed + 1)
+        noise3 = PerlinNoise(octaves=3, seed=self.seed + 2)
+        ridge_noise = PerlinNoise(octaves=1, seed=self.seed + 100)
+
+        elev = np.empty((self.height, self.width))
+        ridge_raw = np.empty((self.height, self.width))
+
+        for y in range(self.height):
+            ny = y / self.height
+            for x in range(self.width):
+                nx = x / self.width
+                continent = continent_noise([nx * 0.8, ny * 0.8])
+                e = noise1([nx * 2, ny * 2])
+                e += 0.5 * noise2([nx * 4, ny * 4])
+                e += 0.25 * noise3([nx * 8, ny * 8])
+                elev[y, x] = e * 0.75 + continent + 0.05
+                ridge_raw[y, x] = ridge_noise([nx * 2, ny * 2])
+
+        # Mountain ridges — vectorised post-pass
+        ridge = 1 - np.abs(ridge_raw)
+        land_mask = elev > 0
+        strong_ridge = ridge > 0.8
+        elev += np.where(land_mask & strong_ridge, (ridge - 0.8) * 0.8, 0.0)
+
+        self.elevation_map = elev
 
     def compute_distance_to_water(self) -> None:
-        water_mask = np.zeros((self.width, self.height), dtype=bool)
-        for x in range(self.width):
-            for y in range(self.height):
-                water_mask[x, y] = self.tiles[x][y].elevation < 0
-
+        # water_mask shape (height, width) — True where water
+        water_mask = self.elevation_map < ELEVATION_SEA
         self.distance_map = distance_transform_edt(~water_mask)
         self.is_water = self.distance_map == 0
         self.is_land = self.distance_map > 0
-    
-    def elevation(self) -> None:
-        noise1 = PerlinNoise(octaves=3, seed=self.seed)
-        noise2 = PerlinNoise(octaves=3, seed=self.seed+1)
-        noise3 = PerlinNoise(octaves=3, seed=self.seed+2)
-
-        for y in range(self.height):
-            for x in range(self.width):
-
-                nx = x / self.width
-                ny = y / self.height
-
-                # continents (low frequency)
-                continent = self.continent_noise([nx*0.8, ny*0.8])
-
-                # principal relief
-                elevation = noise1([nx*2, ny*2])
-
-                # details
-                elevation += 0.5 * noise2([nx*4, ny*4])
-                elevation += 0.25 * noise3([nx*8, ny*8])
-
-                elevation = elevation * 0.75 + continent + 0.05
-
-                tile = Tile(x=x, y=y, elevation=elevation)
-                self.tiles[x][y] = tile
-
-    def add_mountains(self) -> None:
-        ridge_noise = PerlinNoise(octaves=1, seed=self.seed + 100)
-
-        for y in range(self.height):
-            for x in range(self.width):
-                nx = x / self.width
-                ny = y / self.height
-                tile = self.tiles[x][y]
-
-                if tile.elevation > 0:
-                    val = ridge_noise([nx*2, ny*2])
-                    ridge = 1 - abs(val)
-
-                    if ridge > 0.8:
-                        tile.elevation += (ridge - 0.8) * 0.8
 
     def humidity(self) -> None:
-        humidity_seeds = self.humidity_noises(self.humidity_seed)
-        if not hasattr(self, "distance_map"):
-            self.compute_distance_to_water()
+        """Single pass to compute humidity noise, then vectorised water effect."""
+        noise = PerlinNoise(octaves=3, seed=self.humidity_seed)
+
+        noise_grid = np.empty((self.height, self.width))
         for y in range(self.height):
+            ny = y / self.height
             for x in range(self.width):
+                noise_grid[y, x] = noise([x / self.width, ny])
 
-                tile = self.tiles[x][y]
-
-                distance = self.distance_map[x, y]
-
-                water_effect = math.exp(-distance*0.2)
-
-                humidity_noise = humidity_seeds[0]([x/self.width, y/self.height])
-                humidity_noise *= 0.15
-
-                humidity = humidity_noise + water_effect
-                humidity = max(0, min(1, humidity))
-
-                tile.humidity = humidity
-                self.elevation_map[x][y] = tile.elevation
-                self.humidity_map[x][y] = humidity
+        noise_grid *= 0.15
+        water_effect = np.exp(-self.distance_map * 0.2)
+        self.humidity_map = np.clip(noise_grid + water_effect, 0.0, 1.0)
 
     def temperature(self) -> None:
-        for y in range(self.height):
-            for x in range(self.width):
-                tile = self.tiles[x][y]
-                temperature = 1 - abs(tile.elevation * 1.8)
-                tile.temperature = temperature
-                self.temperature_map[x][y] = temperature
+        self.temperature_map = 1 - np.abs(self.elevation_map * 1.8)
 
     def compute_habitability(self) -> None:
-        for y in range(self.height):
-            for x in range(self.width):
-                tile = self.tiles[x][y]
-                if tile.elevation < 0:
-                    habit = -1
-                else:
-                    dist = self.distance_map[x, y]
-                    habit = 2*np.exp(-dist*0.1)             # proximité de l'eau
-                    habit += max(0, tile.river)            # rivière
-                    habit += 2*(0.6 - tile.humidity)       # humidité
-                    habit += 2*(0.6 - tile.temperature)    # température
-                    habit -= max(tile.elevation, 0)*0.5    # élévation
+        land = self.is_land  # bool (height, width)
 
-                tile.habitability = habit
-                self.habitability_map[x][y] = habit 
+        # River contribution: build a (height, width) bool array from tiles
+        river_grid = np.zeros((self.height, self.width))
+        for x in range(self.width):
+            for y in range(self.height):
+                river_grid[y, x] = self.tiles[x][y].river
 
-    def habitability_local_max(self) -> list[tuple[int | float]]:
-        hmap = self.habitability_map
+        habit = np.where(
+            land,
+            (
+                2 * np.exp(-self.distance_map * 0.1)
+                + river_grid
+                + 2 * (0.6 - self.humidity_map)
+                + 2 * (0.6 - self.temperature_map)
+                - np.maximum(self.elevation_map, 0) * 0.5
+            ),
+            -1.0,
+        )
+        self.habitability_map = habit
 
-        # local max in a 5x5 neighborhood
+    def habitability_local_max(self) -> list[tuple]:
+        hmap = self.habitability_map  # (height, width)
         local_max = maximum_filter(hmap, size=15)
-        maxima_mask = (hmap == local_max)
-        maxima_mask &= self.is_land
+        maxima_mask = (hmap == local_max) & self.is_land
 
+        # argwhere returns (row, col) = (y, x)
         coords = np.argwhere(maxima_mask)
-        scores = [hmap[x][y] for x, y in coords]
+        scores = hmap[coords[:, 0], coords[:, 1]]
 
-        locations = list(zip(scores, coords[:,0], coords[:,1]))
-        locations.sort(reverse=True)
+        locations = sorted(
+            zip(scores, coords[:, 1], coords[:, 0]), reverse=True
+        )  # (score, x, y)
+        return locations
 
-        return locations     
-    
-    def generate_rivers(self, n_sources=20, max_length=800) -> None:
-        self.river_flow = np.zeros((self.width, self.height))
-        
-        mountain_tiles = [(tile.x, tile.y) for row in self.tiles for tile in row if tile.elevation > 0.4]
+    def generate_rivers(self, n_sources: int = 20, max_length: int = 800) -> None:
+        self.river_flow = np.zeros((self.height, self.width))
+
+        mountain_tiles = [
+            (tile.x, tile.y)
+            for col in self.tiles
+            for tile in col
+            if self.elevation_map[tile.y, tile.x] > ELEVATION_MOUNTAIN
+        ]
         sources = random.sample(mountain_tiles, min(n_sources, len(mountain_tiles)))
-        
+
         for sx, sy in sources:
             x, y = sx, sy
             path = []
             for _ in range(max_length):
-                tile = self.tiles[x][y]
                 path.append((x, y))
-                if tile.elevation < 0:
+                if self.elevation_map[y, x] < ELEVATION_SEA:
                     break
 
-                neigh_coords = tile.neighbors(self)
-                candidates = []
-                for nx, ny in neigh_coords:
-                    h = self.tiles[nx][ny].elevation
-                    if h <= tile.elevation + 0.02:  
-                        candidates.append((h,nx,ny))
-                
+                neigh_coords = self.tiles[x][y].neighbors(self)
+                candidates = [
+                    (self.elevation_map[ny, nx], nx, ny)
+                    for nx, ny in neigh_coords
+                    if self.elevation_map[ny, nx] <= self.elevation_map[y, x] + 0.02
+                ]
                 if not candidates:
                     break
-                
+
                 candidates.sort()
-                _, x, y = random.choice(candidates[:3]) 
+                _, x, y = random.choice(candidates[:3])
+
             for px, py in path:
-                self.river_flow[px, py] += 1
+                self.river_flow[py, px] += 1
                 self.tiles[px][py].river = 1
 
-        
     def compute_biomes(self) -> None:
-        for y in range(self.height):
-            for x in range(self.width):
+        for x in range(self.width):
+            for y in range(self.height):
                 tile = self.tiles[x][y]
-                tile.biome = tile.compute_biome()
+                tile.biome = tile.compute_biome(
+                    self.elevation_map[y, x],
+                    self.temperature_map[y, x],
+                    self.humidity_map[y, x],
+                )
 
     def generate(self) -> None:
-        self.elevation()
-        self.add_mountains()
+        self.elevation()           # inclut les montagnes (ridge)
         self.compute_distance_to_water()
         self.humidity()
         self.temperature()
@@ -260,15 +239,11 @@ class World:
         self.compute_biomes()
 
     def biome_map(self) -> np.ndarray:
-
-        img = np.zeros((self.height, self.width, 3))
-
+        """Returns RGB image of shape (height, width, 3) ready for imshow."""
+        color_array = np.zeros((self.height, self.width, 3))
         for x in range(self.width):
             for y in range(self.height):
-
                 biome = self.tiles[x][y].biome
-                # conversion RGB (0-255) → matplotlib (0-1)
                 r, g, b = colors[biome]
-                img[y][x] = [r/255, g/255, b/255]
-
-        return img
+                color_array[y, x] = [r / 255, g / 255, b / 255]
+        return color_array
