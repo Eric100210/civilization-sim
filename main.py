@@ -4,10 +4,10 @@ from data.map import World
 from data.tribe import Tribe
 from sim.simulation import Simulation
 
-# -------Paramètres de simulation------
+# --------Simulation parameters--------
 params = {
-    "WIDTH": 300,
-    "HEIGHT": 200,
+    "WIDTH": 375,
+    "HEIGHT": 250,
     "NB_TRIBES": 3,
     "NB_YEARS": 1000,
     "INTERVAL_MS": 50,  # ms between frames — increase to slow down the animation
@@ -18,21 +18,15 @@ params = {
 
 # ------------Simulation---------------
 
-# --- Initialisation ---
 world = World(params["WIDTH"], params["HEIGHT"])
 world.generate(n_rivers=params["N_RIVERS"], river_randomness=params["RIVER_RANDOMNESS"])
-world.display_habitability()
+# world.display_habitability()
 tribes = []
 
 for _ in range(params["NB_TRIBES"]):
     tribe = Tribe(world)
     x, y = tribe.spawn()
     tribes.append(tribe)
-
-    # --- Chaque année ---
-    """recalculer la map d'habitabilité et les maxima locaux, 
-    ça devient un but de s'étendre par là pour chaque civilisation (cf tribe.migrate()), 
-    sauf si ça amène trop de dangers de guerre ?"""
 
 simulation = Simulation(world, tribes, params)
 simulation.start()

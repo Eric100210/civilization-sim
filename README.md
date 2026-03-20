@@ -4,14 +4,14 @@ A procedural civilization simulator where tribes emerge, migrate, build cities, 
 # Animation process
 FuncAnimation (matplotlib)
     │
-    └── Simulation.animate(frame)        ← cosmétique uniquement
+    └── Simulation.animate(frame)        ← displaying
             │
-            ├── World.step(year, tribes) ← toute la logique monde
-            │       └── tribe.step(year, all_tribes)  ← toute la logique tribu
+            ├── World.step(year, tribes) ← all the 'world' logic
+            │       └── tribe.step(year, all_tribes)  ← all the 'tribe' logic
             │               ├── migrate()
             │               ├── reproduce()    ← à implémenter
             │               ├── death()        ← à implémenter
             │               ├── trade()        ← à implémenter
             │               └── war()          ← à implémenter
             │
-            └── scatter.set_offsets(...)  ← mise à jour visuelle
+            └── scatter.set_offsets(...)  ← visual update of tribes

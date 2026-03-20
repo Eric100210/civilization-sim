@@ -2,6 +2,8 @@ import random
 import numpy as np
 from .map import World
 
+HAB_THRESHOLD = 500
+
 
 class Tribe:
     def __init__(self, world: World):
@@ -46,7 +48,13 @@ class Tribe:
         2. DECIDE — migrate only if the best spot is significantly better
            than current location AND the tribe isn't already well-settled.
            The threshold prevents endless restlessness in already-good zones.
+
+        Only active during the nomadic phase (population < SEDENTARY_THRESHOLD).
+        Once sedentary, expand() takes over territorial growth.
         """
+        if self.population >= HAB_THRESHOLD:
+            return
+
         x, y = next(iter(self.territory))
         habit_map = self.world.habitability_map
         current_habit = habit_map[y, x]
@@ -93,11 +101,14 @@ class Tribe:
         self.population += 10
 
     def expand(self) -> None:
+        """After the migration phase, tribes start to expand"""
+        # TODO: it must depend on technology also,
+        # and expansion must go to the best habitable spot, but still from a random departure point
         if not self.territory:
             return
 
         # Carrying capacity: sum of habitability over owned tiles
-        K = 500  # Number of inhabitants supported per habitability point
+        K = HAB_THRESHOLD  # Number of inhabitants supported per habitability point
         carrying_capacity = (
             sum(self.world.habitability_map[y, x] for x, y in self.territory) * K
         )
