@@ -35,21 +35,60 @@ class Simulation:
                 self.scatters[i].set_offsets(np.empty((0, 2)))
 
         self.ax.set_title(f"Year {frame}")
-        return tuple(self.scatters)
+
+        # Update each tribe's info block in the right panel
+        for i, tribe in enumerate(self.tribes):
+            if tribe.alive:
+                pop = int(tribe.population)
+                tiles = len(tribe.territory)
+                text = (
+                    f"── Tribe {i + 1} ──\nPop    : {pop:,}\nSurface  : {tiles} km²\n"
+                )
+            else:
+                text = f"── Tribe {i + 1} ──\n[extinct]"
+            self.pop_texts[i].set_text(text)
+
+        return tuple(self.scatters) + tuple(self.pop_texts)
 
     def display_map(self) -> None:
-        fig, self.ax = plt.subplots()
+        fig = plt.figure(figsize=(14, 7))
+        # Left column (map) takes 3/4 of width, right column (panel) takes 1/4
+        gs = fig.add_gridspec(1, 2, width_ratios=[3, 1], wspace=0.05)
+        self.ax = fig.add_subplot(gs[0])
+        self.panel = fig.add_subplot(gs[1])
+
+        # Map
         img = self.world.biome_map()
-        # origin="lower" so that y=0 is at the bottom, matching tiles[x][y] coords
         self.ax.imshow(img, origin="lower")
         self.ax.set_title("Year 0")
         self.ax.axis("off")
+
+        # Right panel: text board
+        self.panel.axis("off")
 
         for i, tribe in enumerate(self.tribes):
             xs = [x for x, y in tribe.territory]
             ys = [y for x, y in tribe.territory]
             sc = self.ax.scatter(xs, ys, c=TRIBE_COLORS[i], s=4, zorder=3, alpha=0.6)
             self.scatters.append(sc)
+
+        # One text block per tribe in the right panel, stacked vertically
+        self.pop_texts = []
+        n = len(self.tribes)
+        for i in range(n):
+            y_pos = 0.95 - i * (0.9 / n)
+            txt = self.panel.text(
+                0.05,
+                y_pos,
+                "",
+                transform=self.panel.transAxes,
+                ha="left",
+                va="top",
+                fontsize=10,
+                family="monospace",
+                color=TRIBE_COLORS[i],
+            )
+            self.pop_texts.append(txt)
 
         ani = animation.FuncAnimation(
             fig,
