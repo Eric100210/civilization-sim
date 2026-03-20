@@ -13,10 +13,6 @@ class Tribe:
         self.aggressiveness: float | None = None
         self.alive: bool = True
 
-    def display_territory(self) -> None:
-        for x, y in self.territory:
-            self.world.tiles[x][y].biome = "village"
-
     def spawn(self) -> tuple[int, int]:
         # argwhere on (height, width) returns (row, col) = (y, x)
         land_positions = np.argwhere(self.world.is_land)
@@ -33,7 +29,7 @@ class Tribe:
             return
         self.migrate()
         self.population_growth()
-        self.death()
+        self.expand()
         # self.trade(all_tribes)   # à brancher plus tard
         # self.war(all_tribes)     # à brancher plus tard
 
@@ -55,7 +51,8 @@ class Tribe:
         habit_map = self.world.habitability_map
         current_habit = habit_map[y, x]
 
-        # Vision radius: grows logarithmically with population (3–8 tiles)
+        # Vision radius: grows logarithmically with population (3–8 tiles) : or with technology ?
+        # With population / technology growing, they will explore further and migrate more, until war
         pop = max(1, self.population or 1)
         vision = int(np.clip(2 + np.log(pop / 50 + 1) * 2, 3, 8))
 
@@ -89,14 +86,40 @@ class Tribe:
         p = min(1.0, (gain / attachment) * 1.5)
         if random.random() < p:
             self.territory = {(bx, by)}
-            self.display_territory()
 
     def population_growth(self) -> None:
-        """See logistic growth equation (Verhulst 1838)"""
-        pass
+        """See logistic growth equation (Verhulst 1838)
+        Takes death into account ?"""
+        self.population += 10
 
-    def death(self) -> None:
-        pass
+    def expand(self) -> None:
+        if not self.territory:
+            return
+
+        # Carrying capacity: sum of habitability over owned tiles
+        K = 500  # Number of inhabitants supported per habitability point
+        carrying_capacity = (
+            sum(self.world.habitability_map[y, x] for x, y in self.territory) * K
+        )
+        carrying_capacity = max(1.0, carrying_capacity)
+
+        pressure = self.population / carrying_capacity
+        if pressure <= 1.0:
+            return
+
+        # Number of tiles to colonize this year (~Poisson)
+        n_tiles = np.random.poisson(lam=pressure - 1.0)
+        for _ in range(n_tiles):
+            departure_point = random.choice(list(self.territory))
+            x, y = departure_point
+            neighbors = self.world.tiles[x][y].neighbors(self.world)
+            land_neighbors = [
+                (nx, ny)
+                for nx, ny in neighbors
+                if self.world.is_land[ny, nx] and (nx, ny) not in self.territory
+            ]
+            if land_neighbors:
+                self.territory.add(random.choice(land_neighbors))
 
     def trade(self, all_tribes: list["Tribe"]) -> None:
         pass

@@ -13,7 +13,6 @@ colors = {
     "mountains": (140, 140, 140),
     "snow": (250, 250, 250),
     "river": (66, 120, 241),
-    "village": (102, 57, 9),
 }
 
 # Biome thresholds
