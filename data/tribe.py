@@ -95,42 +95,85 @@ class Tribe:
         if random.random() < p:
             self.territory = {(bx, by)}
 
+    def _carrying_capacity(self) -> float:
+        """Sum of habitability over owned tiles, scaled by HAB_THRESHOLD."""
+        return max(
+            1.0,
+            sum(self.world.habitability_map[y, x] for x, y in self.territory)
+            * HAB_THRESHOLD,
+        )
+
+    def _border_tiles(self) -> list[tuple[int, int]]:
+        """All land tiles adjacent to the territory but not yet owned."""
+        candidates = set()
+        for x, y in self.territory:
+            for nx, ny in self.world.tiles[x][y].neighbors(self.world):
+                if self.world.is_land[ny, nx] and (nx, ny) not in self.territory:
+                    candidates.add((nx, ny))
+        return list(candidates)
+
     def population_growth(self) -> None:
-        """See logistic growth equation (Verhulst 1838)
-        Takes death into account ?"""
-        self.population += 10
+        n = len(self.territory)
+        avg_hab = np.mean(
+            [self.world.habitability_map[y, x] for x, y in self.territory]
+        )
+        density = self.population / max(1, n)
+
+        # Natality: favorable environment + resources (so commerce) + peace (no war)
+        # implement resources and technology logic to have a real population model
+        birth_rate = 0.002 + avg_hab * 0.01
+
+        # Mortality : density + technology reducing it + extreme climate
+        tech = self.technology or 0.0
+        death_rate = 0.001 + density * 0.00005  # - tech * 0.001
+
+        r = birth_rate - death_rate
+        self.population = max(1.0, self.population * (1 + r))
 
     def expand(self) -> None:
-        """After the migration phase, tribes start to expand"""
-        # TODO: it must depend on technology also,
-        # and expansion must go to the best habitable spot, but still from a random departure point
+        """
+        Two mechanisms of territorial expansion:
+
+        1. PRESSURE — overpopulation (P > K): the tribe must expand to survive.
+           Number of new tiles ~ Poisson(pressure - 1).
+
+        2. OPPORTUNISTIC — even without pressure, the tribe slowly colonizes
+           adjacent tiles that are significantly more fertile than its current average.
+        """
         if not self.territory:
             return
 
-        # Carrying capacity: sum of habitability over owned tiles
-        K = HAB_THRESHOLD  # Number of inhabitants supported per habitability point
-        carrying_capacity = (
-            sum(self.world.habitability_map[y, x] for x, y in self.territory) * K
-        )
-        carrying_capacity = max(1.0, carrying_capacity)
+        K = self._carrying_capacity()
+        pressure = self.population / K
+        border = self._border_tiles()
 
-        pressure = self.population / carrying_capacity
-        if pressure <= 1.0:
+        if not border:
             return
 
-        # Number of tiles to colonize this year (~Poisson)
-        n_tiles = np.random.poisson(lam=pressure - 1.0)
-        for _ in range(n_tiles):
-            departure_point = random.choice(list(self.territory))
-            x, y = departure_point
-            neighbors = self.world.tiles[x][y].neighbors(self.world)
-            land_neighbors = [
-                (nx, ny)
-                for nx, ny in neighbors
-                if self.world.is_land[ny, nx] and (nx, ny) not in self.territory
-            ]
-            if land_neighbors:
-                self.territory.add(random.choice(land_neighbors))
+        # 1. Pressure-driven expansion
+        if pressure > 1.0:
+            n_tiles = np.random.poisson(lam=pressure - 1.0)
+            for _ in range(n_tiles):
+                if not border:
+                    break
+                chosen = random.choice(border)
+                self.territory.add(chosen)
+                border.remove(chosen)
+
+        # 2. Opportunistic expansion toward more fertile land
+        avg_hab = K / (len(self.territory) * HAB_THRESHOLD)
+        for nx, ny in border:
+            tile_hab = self.world.habitability_map[ny, nx]
+            if tile_hab > avg_hab and random.random() < 0.01:
+                self.territory.add((nx, ny))
+
+    def resources(self):
+        """Ressources sur les terres + exploration des zones alentours, surtout les montagnes pour les minerais"""
+        pass
+
+    def technology(self):
+        """Dépend des ressources trouvées et du savoir-faire"""
+        pass
 
     def trade(self, all_tribes: list["Tribe"]) -> None:
         pass
