@@ -4,6 +4,7 @@ import random
 import math
 from scipy.ndimage import distance_transform_edt, maximum_filter, gaussian_filter
 from heapq import heappush, heappop
+from .resources import Resources, ResourceType
 
 
 colors = {
@@ -82,6 +83,9 @@ class World:
         self.temperature_map: np.ndarray = np.zeros((height, width))
         self.habitability_map: np.ndarray = np.zeros((height, width))
         self.river_flow: np.ndarray = np.zeros((height, width))
+        self.resource_maps: dict[str, np.ndarray] = {
+            t.value: np.zeros((height, width)) for t in ResourceType
+        }
         self.distance_map: np.ndarray | None = None
         self.is_land: np.ndarray | None = None
         self.is_water: np.ndarray | None = None
@@ -326,6 +330,29 @@ class World:
                     self.humidity_map[y, x],
                 )
 
+    def generate_resources(self) -> None:
+        for x in range(self.width):
+            for y in range(self.height):
+                tile = self.tiles[x][y]
+                if tile.biome == "ocean" or tile.biome == "river":
+                    self.resource_maps[ResourceType.WATER.value][y, x] = 1000
+                    self.resource_maps[ResourceType.FOOD.value][y, x] = 5
+                elif tile.biome == "mountains":
+                    self.resource_maps[ResourceType.FOOD.value][y, x] = 1
+                    self.resource_maps[ResourceType.STONE.value][y, x] = 10
+                    self.resource_maps[ResourceType.IRON.value][y, x] = 5
+                    self.resource_maps[ResourceType.GOLD.value][y, x] = 1
+                elif tile.biome == "snow":
+                    self.resource_maps[ResourceType.STONE.value][y, x] = 10
+                    self.resource_maps[ResourceType.WATER.value][y, x] = 5
+                elif tile.biome == "desert":
+                    self.resource_maps[ResourceType.STONE.value][y, x] = 3
+                    self.resource_maps[ResourceType.IRON.value][y, x] = 3
+                    self.resource_maps[ResourceType.GOLD.value][y, x] = 0.1
+                else:
+                    self.resource_maps[ResourceType.FOOD.value][y, x] = 10
+                    self.resource_maps[ResourceType.STONE.value][y, x] = 1
+
     def generate(self, n_rivers: int = 20, river_randomness: float = 0.3) -> None:
         self.elevation()  # inclut les montagnes (ridge)
         self.compute_distance_to_water()
@@ -334,6 +361,7 @@ class World:
         self.generate_rivers(n_sources=n_rivers, randomness=river_randomness)
         self.compute_habitability()
         self.compute_biomes()
+        self.generate_resources()
 
     def step(self, year: int, tribes: list) -> None:
         """
