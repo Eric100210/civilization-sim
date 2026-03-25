@@ -143,6 +143,9 @@ class Tribe:
         if not self.territory:
             return
 
+        if self.population < HAB_THRESHOLD:
+            return
+
         K = self._carrying_capacity()
         pressure = self.population / K
         border = self._border_tiles()

@@ -32,7 +32,7 @@ class Tile:
     def __init__(self, x: int, y: int):
         self.x = x
         self.y = y
-        self.river = 0
+        self.is_river = 0
         self.biome = None
 
     def compute_biome(
@@ -40,7 +40,7 @@ class Tile:
     ) -> str:
         if elevation < ELEVATION_SEA:
             return "ocean"
-        if self.river == 1:
+        if self.is_river == 1:
             return "river"
         if elevation > ELEVATION_MOUNTAIN:
             return "snow" if temperature < 0 else "mountains"
@@ -157,7 +157,7 @@ class World:
         river_grid = np.zeros((self.height, self.width))
         for x in range(self.width):
             for y in range(self.height):
-                river_grid[y, x] = self.tiles[x][y].river
+                river_grid[y, x] = self.tiles[x][y].is_river
         river_influence = gaussian_filter(river_grid, sigma=2) * 3.0
 
         # Temperature: bell curve centred on 0.5 (≈15°C, optimal for agriculture)
@@ -314,7 +314,7 @@ class World:
 
             for py, px in path:
                 self.river_flow[py, px] += 1
-                self.tiles[px][py].river = 1
+                self.tiles[px][py].is_river = 1
 
     def compute_biomes(self) -> None:
         for x in range(self.width):
