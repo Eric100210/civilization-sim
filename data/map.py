@@ -4,7 +4,7 @@ import random
 import math
 from scipy.ndimage import distance_transform_edt, maximum_filter, gaussian_filter
 from heapq import heappush, heappop
-from .resources import Resources, ResourceType
+from .resources import ResourceType
 
 
 colors = {

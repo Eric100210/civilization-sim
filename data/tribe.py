@@ -1,6 +1,7 @@
 import random
 import numpy as np
 from .map import World
+from .resources import ResourceType
 
 HAB_THRESHOLD = 500
 
@@ -9,7 +10,7 @@ class Tribe:
     def __init__(self, world: World):
         self.world = world
         self.population: float | None = None
-        self.resources: float | None = None
+        self.resources: dict[str, int] = {t.value: 0 for t in ResourceType}
         self.territory: set[tuple[int, int]] | None = None
         self.technology: float | None = None
         self.aggressiveness: float | None = None
@@ -32,8 +33,11 @@ class Tribe:
         self.migrate()
         self.population_growth()
         self.expand()
-        # self.trade(all_tribes)   # à brancher plus tard
-        # self.war(all_tribes)     # à brancher plus tard
+        self.get_resources()
+        # self.eat()
+        # self.get_technology()
+        # self.trade(all_tribes)
+        # self.war(all_tribes)
 
     # ------------------------------------------------------------------
     # Actions
@@ -170,9 +174,26 @@ class Tribe:
             if tile_hab > avg_hab and random.random() < 0.01:
                 self.territory.add((nx, ny))
 
-    def get_resources(self):
-        """Ressources sur les terres + exploration des zones alentours, surtout les montagnes pour les minerais"""
+    def exploration(self):
         pass
+
+    def get_resources(self):
+        """Ressources sur les terres + exploration (def exploration) des zones alentours, surtout les montagnes pour les minerais"""
+        # extraction des ressources du territoire propre
+        for x, y in self.territory:
+            for resource in [t.value for t in ResourceType]:
+                self.resources[resource] += self.world.resource_maps[resource][y, x]
+        # exploration à implémenter :
+
+    def eat(self) -> None:
+        self.resources[ResourceType.WATER.value] -= int(self.population / 100)
+        self.resources[ResourceType.FOOD.value] -= int(self.population / 100)
+        if self.resources[ResourceType.WATER.value] < 0:
+            lack = self.resources[ResourceType.WATER.value] + int(self.population / 100)
+            self.population -= lack * 10
+        if self.resources[ResourceType.FOOD.value] < 0:
+            lack = self.resources[ResourceType.FOOD.value] + int(self.population / 100)
+            self.population -= lack * 5
 
     def get_technology(self):
         """Dépend des ressources trouvées et du savoir-faire"""
