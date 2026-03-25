@@ -34,7 +34,7 @@ class Tribe:
         self.population_growth()
         self.expand()
         self.get_resources()
-        # self.eat()
+        self.eat()
         # self.get_technology()
         # self.trade(all_tribes)
         # self.war(all_tribes)
@@ -179,21 +179,28 @@ class Tribe:
 
     def get_resources(self):
         """Ressources sur les terres + exploration (def exploration) des zones alentours, surtout les montagnes pour les minerais"""
-        # extraction des ressources du territoire propre
+        # Consumables (water, food): reset each year — they are a flux, not a stock
+        self.resources[ResourceType.WATER.value] = 0
+        self.resources[ResourceType.FOOD.value] = 0
+        # Accumulables (stone, iron, gold, wood): keep existing stock, add this year's harvest
         for x, y in self.territory:
             for resource in [t.value for t in ResourceType]:
                 self.resources[resource] += self.world.resource_maps[resource][y, x]
         # exploration à implémenter :
 
     def eat(self) -> None:
-        self.resources[ResourceType.WATER.value] -= int(self.population / 100)
-        self.resources[ResourceType.FOOD.value] -= int(self.population / 100)
-        if self.resources[ResourceType.WATER.value] < 0:
-            lack = self.resources[ResourceType.WATER.value] + int(self.population / 100)
-            self.population -= lack * 10
-        if self.resources[ResourceType.FOOD.value] < 0:
-            lack = self.resources[ResourceType.FOOD.value] + int(self.population / 100)
-            self.population -= lack * 5
+        water_needed = int(self.population / 100)
+        food_needed = int(self.population / 100)
+
+        water_lack = max(0, water_needed - self.resources[ResourceType.WATER.value])
+        food_lack = max(0, food_needed - self.resources[ResourceType.FOOD.value])
+
+        self.resources[ResourceType.WATER.value] -= water_needed
+        self.resources[ResourceType.FOOD.value] -= food_needed
+
+        self.population -= water_lack * 10
+        self.population -= food_lack * 5
+        self.population = max(1.0, self.population)
 
     def get_technology(self):
         """Dépend des ressources trouvées et du savoir-faire"""
