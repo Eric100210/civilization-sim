@@ -170,11 +170,11 @@ class Tribe:
             if tile_hab > avg_hab and random.random() < 0.01:
                 self.territory.add((nx, ny))
 
-    def resources(self):
+    def get_resources(self):
         """Ressources sur les terres + exploration des zones alentours, surtout les montagnes pour les minerais"""
         pass
 
-    def technology(self):
+    def get_technology(self):
         """Dépend des ressources trouvées et du savoir-faire"""
         pass
 
