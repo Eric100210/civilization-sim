@@ -349,7 +349,8 @@ class World:
                     self.resource_maps[ResourceType.STONE.value][y, x] = 3
                     self.resource_maps[ResourceType.IRON.value][y, x] = 3
                     self.resource_maps[ResourceType.GOLD.value][y, x] = 0.1
-                else:
+                else:  # plains
+                    self.resource_maps[ResourceType.WATER.value][y, x] = 3
                     self.resource_maps[ResourceType.FOOD.value][y, x] = 10
                     self.resource_maps[ResourceType.STONE.value][y, x] = 1
 

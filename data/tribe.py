@@ -10,7 +10,7 @@ class Tribe:
     def __init__(self, world: World):
         self.world = world
         self.population: float | None = None
-        self.resources: dict[str, int] = {t.value: 0 for t in ResourceType}
+        self.resources: dict[str, int | float] = {t.value: 0 for t in ResourceType}
         self.territory: set[tuple[int, int]] | None = None
         self.technology: float | None = None
         self.aggressiveness: float | None = None
@@ -125,13 +125,15 @@ class Tribe:
 
         # Natality: favorable environment + resources (so commerce) + peace (no war)
         # implement resources and technology logic to have a real population model
-        birth_rate = 0.002 + avg_hab * 0.01
+        self.birth_rate = (
+            0.002 + avg_hab * 0.01 + self.resources[ResourceType.FOOD.value] * 0.0001
+        )
 
         # Mortality : density + technology reducing it + extreme climate
         tech = self.technology or 0.0
-        death_rate = 0.001 + density * 0.00005  # - tech * 0.001
+        self.death_rate = 0.001 + density * 0.00005  # - tech * 0.001
 
-        r = birth_rate - death_rate
+        r = self.birth_rate - self.death_rate
         self.population = max(1.0, self.population * (1 + r))
 
     def expand(self) -> None:
@@ -174,10 +176,76 @@ class Tribe:
             if tile_hab > avg_hab and random.random() < 0.01:
                 self.territory.add((nx, ny))
 
-    def exploration(self):
-        pass
+    def exploration(self) -> dict[str, int | float]:
+        """
+        Simulates an expedition leaving from a random border tile and walking
+        length_exploration steps in a roughly consistent direction.
 
-    def get_resources(self):
+        At each step, the walker picks from the 3 neighbors closest to its
+        current heading (forward-left, forward, forward-right), biased toward
+        staying on course. This produces a realistic linear expedition that
+        slightly meanders rather than covering the whole surrounding area.
+        """
+        harvest = {t.value: 0.0 for t in ResourceType}
+
+        border = self._border_tiles()
+        if not border:
+            return harvest
+
+        # length_exploration = f(self.technology, self.population)
+        length_exploration = 5  # for now
+        exploration_efficiency = 0.2
+
+        start = random.choice(border)
+        dirs = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]
+
+        x, y = start
+        outward_dirs = [
+            (dx, dy) for dx, dy in dirs if (x + dx, y + dy) not in self.territory
+        ]
+        if not outward_dirs:
+            return harvest  # surrounded — can't explore
+        heading = random.choice(outward_dirs)
+
+        # visited includes the full territory so the walk never crosses back into it
+        visited = set(self.territory) | {(x, y)}
+
+        for _ in range(length_exploration):
+            hdx, hdy = heading
+
+            # Candidate directions: forward-left, forward, forward-right
+            # i.e. the 3 directions whose dot product (produit scalaire) with heading is highest
+            scored = sorted(dirs, key=lambda d: d[0] * hdx + d[1] * hdy, reverse=True)
+            candidates = scored[:3]  # top 3 most aligned with heading
+
+            # Try candidates in order until we find a valid land tile
+            moved = False
+            random.shuffle(candidates)
+            for dx, dy in candidates:
+                nx, ny = x + dx, y + dy
+                if (
+                    0 <= nx < self.world.width
+                    and 0 <= ny < self.world.height
+                    and self.world.is_land[ny, nx]
+                    and (nx, ny) not in visited
+                ):
+                    x, y = nx, ny
+                    heading = (dx, dy)
+                    visited.add((x, y))
+                    moved = True
+                    break
+
+            if not moved:
+                break  # blocked (ocean, map edge) — expedition ends early
+
+            for t in ResourceType:
+                harvest[t.value] += (
+                    self.world.resource_maps[t.value][y, x] * exploration_efficiency
+                )
+
+        return harvest
+
+    def get_resources(self) -> None:
         """Ressources sur les terres + exploration (def exploration) des zones alentours, surtout les montagnes pour les minerais"""
         # Consumables (water, food): reset each year — they are a flux, not a stock
         self.resources[ResourceType.WATER.value] = 0
@@ -186,7 +254,10 @@ class Tribe:
         for x, y in self.territory:
             for resource in [t.value for t in ResourceType]:
                 self.resources[resource] += self.world.resource_maps[resource][y, x]
-        # exploration à implémenter :
+        # Exploring to get more resources
+        explored = self.exploration()
+        for t in ResourceType:
+            self.resources[t.value] += explored[t.value]
 
     def eat(self) -> None:
         water_needed = int(self.population / 100)
@@ -198,8 +269,8 @@ class Tribe:
         self.resources[ResourceType.WATER.value] -= water_needed
         self.resources[ResourceType.FOOD.value] -= food_needed
 
-        self.population -= water_lack * 10
-        self.population -= food_lack * 5
+        self.population -= water_lack * 2
+        self.population -= food_lack * 1
         self.population = max(1.0, self.population)
 
     def get_technology(self):

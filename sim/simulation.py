@@ -41,9 +41,7 @@ class Simulation:
             if tribe.alive:
                 pop = int(tribe.population)
                 tiles = len(tribe.territory)
-                text = (
-                    f"── Tribe {i + 1} ──\nPop    : {pop:,}\nSurface  : {tiles} km²\n"
-                )
+                text = f"── Tribe {i + 1} ──\nPop    : {pop:,}\nSurface  : {tiles} km²\nBirth Rate  : {tribe.birth_rate} %\nDeath Rate  : {tribe.death_rate} %\n"
             else:
                 text = f"── Tribe {i + 1} ──\n[extinct]"
             self.pop_texts[i].set_text(text)
