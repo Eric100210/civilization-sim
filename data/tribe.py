@@ -3,7 +3,7 @@ import numpy as np
 from .map import World
 from .resources import ResourceType, HISTORICAL_ERAS
 
-HAB_THRESHOLD = 500
+HAB_THRESHOLD = 80
 
 
 class Tribe:
@@ -16,6 +16,7 @@ class Tribe:
         self.technology: float = 0
         self.aggressiveness: float | None = None
         self.alive: bool = True
+        self.known_good_spots: dict[tuple[int, int], float] = {}  # (x,y) -> habitability
 
     def spawn(self) -> tuple[int, int]:
         # argwhere on (height, width) returns (row, col) = (y, x)
@@ -24,7 +25,7 @@ class Tribe:
         self.territory = {(x, y)}
         # initial population : lognormal distribution
         habit = self.world.habitability_map[y, x]
-        self.population = np.random.lognormal(mean=3.5 + habit, sigma=0.3)
+        self.population = np.random.lognormal(mean=3.0 + 0.1 * habit, sigma=0.4)
         return x, y
 
     def step(self, year: int, all_tribes: list["Tribe"]) -> None:
@@ -32,11 +33,12 @@ class Tribe:
         if not self.alive:
             return
         self.migrate()
-        self.population_growth()
+        self.get_resources()       # collect this year's resources before any decisions
+        self.population_growth()   # sees fresh food from this year
         self.expand()
-        self.get_resources()
         self.eat()
         self.get_technology()
+        self._check_extinction()
         # self.trade(all_tribes)
         # self.war(all_tribes)
 
@@ -64,10 +66,9 @@ class Tribe:
         habit_map = self.world.habitability_map
         current_habit = habit_map[y, x]
 
-        # Vision radius: grows logarithmically with population (3–8 tiles) : or with technology ?
-        # With population / technology growing, they will explore further and migrate more, until war
+        # Vision radius: grows logarithmically with population (4–15 tiles)
         pop = max(1, self.population or 1)
-        vision = int(np.clip(2 + np.log(pop / 50 + 1) * 2, 3, 8))
+        vision = int(np.clip(3 + np.log(pop / 30 + 1) * 2.5, 4, 15))
 
         # Scan all tiles within vision radius
         best_h, bx, by = current_habit, x, y
@@ -94,6 +95,22 @@ class Tribe:
         # need a proportionally larger gain to bother moving.
         gain = best_h - current_habit
         if gain <= 0:
+            # No immediate improvement in vision range — check long-range memory
+            if self.known_good_spots:
+                best_known_hab = max(self.known_good_spots.values())
+                if best_known_hab > current_habit + 0.3:
+                    best_known_pos = max(self.known_good_spots, key=self.known_good_spots.get)
+                    bkx, bky = best_known_pos
+                    step_x = int(np.sign(bkx - x))
+                    step_y = int(np.sign(bky - y))
+                    cx, cy = x + step_x, y + step_y
+                    if (
+                        0 <= cx < self.world.width
+                        and 0 <= cy < self.world.height
+                        and self.world.is_land[cy, cx]
+                        and random.random() < 0.4
+                    ):
+                        self.territory = {(cx, cy)}
             return
         attachment = 1.0 + current_habit * 0.3
         p = min(1.0, (gain / attachment) * 1.5)
@@ -124,15 +141,15 @@ class Tribe:
         )
         density = self.population / max(1, n)
 
-        # Natality: favorable environment + resources (so commerce) + peace (no war)
-        # implement resources and technology logic to have a real population model
+        # Natality: base pre-modern rate + habitat quality + food surplus bonus
+        food = self.resources[ResourceType.FOOD.value]
         self.birth_rate = (
-            0.002 + avg_hab * 0.01 + self.resources[ResourceType.FOOD.value] * 0.0001
+            0.015 + avg_hab * 0.010 + food * 0.00005
         )
 
-        # Mortality : density - technology bonus + extreme climate
+        # Mortality: base pre-modern rate + density crowding - era technology bonus
         death_rate_bonus = HISTORICAL_ERAS[self.hist_eras]["death_rate_bonus"]
-        self.death_rate = max(0.0, 0.001 + density * 0.00005 - death_rate_bonus)
+        self.death_rate = max(0.0, 0.008 + density * 0.000088 - death_rate_bonus)
 
         r = self.birth_rate - self.death_rate
         self.population = max(1.0, self.population * (1 + r))
@@ -174,7 +191,7 @@ class Tribe:
         avg_hab = K / (len(self.territory) * HAB_THRESHOLD)
         for nx, ny in border:
             tile_hab = self.world.habitability_map[ny, nx]
-            if tile_hab > avg_hab and random.random() < 0.01:
+            if tile_hab > avg_hab and random.random() < 0.05:
                 self.territory.add((nx, ny))
 
     def exploration(self) -> dict[str, int | float]:
@@ -193,7 +210,7 @@ class Tribe:
         if not border:
             return harvest
 
-        length_exploration = 5 + HISTORICAL_ERAS[self.hist_eras]["exploration_bonus"]
+        length_exploration = 7 + HISTORICAL_ERAS[self.hist_eras]["exploration_bonus"]
         exploration_efficiency = 0.2
 
         start = random.choice(border)
@@ -243,6 +260,12 @@ class Tribe:
                     self.world.resource_maps[t.value][y, x] * exploration_efficiency
                 )
 
+            # Record high-habitability tiles as potential migration targets
+            tile_hab = self.world.habitability_map[y, x]
+            if tile_hab > 1.8:
+                if (x, y) not in self.known_good_spots or self.known_good_spots[(x, y)] < tile_hab:
+                    self.known_good_spots[(x, y)] = tile_hab
+
         return harvest
 
     def get_resources(self) -> None:
@@ -271,7 +294,7 @@ class Tribe:
 
         self.population -= water_lack * 2
         self.population -= food_lack * 1
-        self.population = max(1.0, self.population)
+        self.population = max(0.0, self.population)
 
     def get_technology(self) -> None:
         """
@@ -286,6 +309,13 @@ class Tribe:
             for t, qty in requirements.items():
                 self.resources[t.value] -= qty
             self.hist_eras = next_era
+
+    def _check_extinction(self) -> None:
+        """Mark tribe extinct if population falls below minimum viable threshold."""
+        if self.population < 5:
+            self.alive = False
+            self.population = 0.0
+            self.territory = set()
 
     def trade(self, all_tribes: list["Tribe"]) -> None:
         pass

@@ -340,8 +340,8 @@ class World:
                 elif tile.biome == "mountains":
                     self.resource_maps[ResourceType.FOOD.value][y, x] = 1
                     self.resource_maps[ResourceType.STONE.value][y, x] = 10
-                    self.resource_maps[ResourceType.IRON.value][y, x] = 5
-                    self.resource_maps[ResourceType.GOLD.value][y, x] = 1
+                    self.resource_maps[ResourceType.IRON.value][y, x] = 8
+                    self.resource_maps[ResourceType.GOLD.value][y, x] = 2
                 elif tile.biome == "snow":
                     self.resource_maps[ResourceType.STONE.value][y, x] = 10
                     self.resource_maps[ResourceType.WATER.value][y, x] = 5
@@ -353,6 +353,7 @@ class World:
                     self.resource_maps[ResourceType.WATER.value][y, x] = 3
                     self.resource_maps[ResourceType.FOOD.value][y, x] = 10
                     self.resource_maps[ResourceType.STONE.value][y, x] = 1
+                    self.resource_maps[ResourceType.WOOD.value][y, x] = 2
 
     def generate(self, n_rivers: int = 20, river_randomness: float = 0.3) -> None:
         self.elevation()  # inclut les montagnes (ridge)
