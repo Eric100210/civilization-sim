@@ -1,5 +1,6 @@
 from data.tribe import Tribe
 from data.map import World
+from data.resources import HISTORICAL_ERAS
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 import numpy as np
@@ -41,7 +42,16 @@ class Simulation:
             if tribe.alive:
                 pop = int(tribe.population)
                 tiles = len(tribe.territory)
-                text = f"── Tribe {i + 1} ──\nPop    : {pop:,}\nSurface  : {tiles} km²\nBirth Rate  : {tribe.birth_rate} %\nDeath Rate  : {tribe.death_rate} %\n"
+                era = HISTORICAL_ERAS[tribe.hist_eras]["name"]
+                text = (
+                    f"── Tribe {i + 1} ──\n"
+                    f"Era      : {era}\n"
+                    f"Pop      : {pop:,}\n"
+                    f"Surface  : {tiles} km²\n"
+                    f"Birth    : {tribe.birth_rate:.4f}\n"
+                    f"Death    : {tribe.death_rate:.4f}\n"
+                    f"Resources: {tribe.resources['iron']}\n"
+                )
             else:
                 text = f"── Tribe {i + 1} ──\n[extinct]"
             self.pop_texts[i].set_text(text)

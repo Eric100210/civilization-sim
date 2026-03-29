@@ -1,7 +1,7 @@
 import random
 import numpy as np
 from .map import World
-from .resources import ResourceType
+from .resources import ResourceType, HISTORICAL_ERAS
 
 HAB_THRESHOLD = 500
 
@@ -12,7 +12,8 @@ class Tribe:
         self.population: float | None = None
         self.resources: dict[str, int | float] = {t.value: 0 for t in ResourceType}
         self.territory: set[tuple[int, int]] | None = None
-        self.technology: float | None = None
+        self.hist_eras: int = 0  # era index into HISTORICAL_ERAS
+        self.technology: float = 0
         self.aggressiveness: float | None = None
         self.alive: bool = True
 
@@ -35,7 +36,7 @@ class Tribe:
         self.expand()
         self.get_resources()
         self.eat()
-        # self.get_technology()
+        self.get_technology()
         # self.trade(all_tribes)
         # self.war(all_tribes)
 
@@ -129,9 +130,9 @@ class Tribe:
             0.002 + avg_hab * 0.01 + self.resources[ResourceType.FOOD.value] * 0.0001
         )
 
-        # Mortality : density + technology reducing it + extreme climate
-        tech = self.technology or 0.0
-        self.death_rate = 0.001 + density * 0.00005  # - tech * 0.001
+        # Mortality : density - technology bonus + extreme climate
+        death_rate_bonus = HISTORICAL_ERAS[self.hist_eras]["death_rate_bonus"]
+        self.death_rate = max(0.0, 0.001 + density * 0.00005 - death_rate_bonus)
 
         r = self.birth_rate - self.death_rate
         self.population = max(1.0, self.population * (1 + r))
@@ -192,8 +193,7 @@ class Tribe:
         if not border:
             return harvest
 
-        # length_exploration = f(self.technology, self.population)
-        length_exploration = 5  # for now
+        length_exploration = 5 + HISTORICAL_ERAS[self.hist_eras]["exploration_bonus"]
         exploration_efficiency = 0.2
 
         start = random.choice(border)
@@ -273,9 +273,19 @@ class Tribe:
         self.population -= food_lack * 1
         self.population = max(1.0, self.population)
 
-    def get_technology(self):
-        """Dépend des ressources trouvées et du savoir-faire"""
-        pass
+    def get_technology(self) -> None:
+        """
+        Unlock the next technological era if the tribe has accumulated
+        enough resources. Resources are consumed on unlock.
+        """
+        next_era = self.hist_eras + 1
+        if next_era not in HISTORICAL_ERAS:
+            return
+        requirements = HISTORICAL_ERAS[next_era]["unlock"]
+        if all(self.resources[t.value] >= qty for t, qty in requirements.items()):
+            for t, qty in requirements.items():
+                self.resources[t.value] -= qty
+            self.hist_eras = next_era
 
     def trade(self, all_tribes: list["Tribe"]) -> None:
         pass
