@@ -16,7 +16,9 @@ class Tribe:
         self.technology: float = 0
         self.aggressiveness: float | None = None
         self.alive: bool = True
-        self.known_good_spots: dict[tuple[int, int], float] = {}  # (x,y) -> habitability
+        self.known_good_spots: dict[
+            tuple[int, int], float
+        ] = {}  # (x,y) -> habitability
 
     def spawn(self) -> tuple[int, int]:
         # argwhere on (height, width) returns (row, col) = (y, x)
@@ -33,8 +35,8 @@ class Tribe:
         if not self.alive:
             return
         self.migrate()
-        self.get_resources()       # collect this year's resources before any decisions
-        self.population_growth()   # sees fresh food from this year
+        self.get_resources()  # collect this year's resources before any decisions
+        self.population_growth()  # sees fresh food from this year
         self.expand()
         self.eat()
         self.get_technology()
@@ -99,7 +101,9 @@ class Tribe:
             if self.known_good_spots:
                 best_known_hab = max(self.known_good_spots.values())
                 if best_known_hab > current_habit + 0.3:
-                    best_known_pos = max(self.known_good_spots, key=self.known_good_spots.get)
+                    best_known_pos = max(
+                        self.known_good_spots, key=self.known_good_spots.get
+                    )
                     bkx, bky = best_known_pos
                     step_x = int(np.sign(bkx - x))
                     step_y = int(np.sign(bky - y))
@@ -142,10 +146,10 @@ class Tribe:
         density = self.population / max(1, n)
 
         # Natality: base pre-modern rate + habitat quality + food surplus bonus
+        # Food bonus uses log to avoid runaway growth: large territories collect
+        # enormous food totals, so a linear coefficient causes birth_rate > 1.
         food = self.resources[ResourceType.FOOD.value]
-        self.birth_rate = (
-            0.015 + avg_hab * 0.010 + food * 0.00005
-        )
+        self.birth_rate = 0.015 + avg_hab * 0.010 + np.log1p(food) * 0.001
 
         # Mortality: base pre-modern rate + density crowding - era technology bonus
         death_rate_bonus = HISTORICAL_ERAS[self.hist_eras]["death_rate_bonus"]
@@ -263,7 +267,9 @@ class Tribe:
             # Record high-habitability tiles as potential migration targets
             tile_hab = self.world.habitability_map[y, x]
             if tile_hab > 1.8:
-                if (x, y) not in self.known_good_spots or self.known_good_spots[(x, y)] < tile_hab:
+                if (x, y) not in self.known_good_spots or self.known_good_spots[
+                    (x, y)
+                ] < tile_hab:
                     self.known_good_spots[(x, y)] = tile_hab
 
         return harvest
