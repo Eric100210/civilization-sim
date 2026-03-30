@@ -89,6 +89,7 @@ class World:
         self.distance_map: np.ndarray | None = None
         self.is_land: np.ndarray | None = None
         self.is_water: np.ndarray | None = None
+        self.biome_array: np.ndarray | None = None
 
     def display_habitability(self) -> None:
         import matplotlib.pyplot as plt
@@ -158,10 +159,7 @@ class World:
         # River influence: binary mask blurred into a valley effect.
         # sigma controls how far the fertility bonus spreads from the river bank.
         # sigma=2 ≈ 2 tiles radius, peaks at 3.0 on the river itself.
-        river_grid = np.zeros((self.height, self.width))
-        for x in range(self.width):
-            for y in range(self.height):
-                river_grid[y, x] = self.tiles[x][y].is_river
+        river_grid = (self.river_flow > 0).astype(float)
         river_influence = gaussian_filter(river_grid, sigma=2) * 3.0
 
         # Temperature: bell curve centred on 0.5 (≈15°C, optimal for agriculture)
@@ -175,7 +173,7 @@ class World:
 
         # Alluvial fertility bonus: flat low land adjacent to a river
         # (river deltas and floodplains — historically where civilisations begin)
-        alluvial = (self.elevation_map < 0.15) & (river_grid == 1)
+        alluvial = (self.elevation_map < 0.15) & (self.river_flow > 0)
         fertility_bonus = alluvial.astype(float) * 2.0
 
         # Altitude penalty: non-linear above 0.15
@@ -321,6 +319,7 @@ class World:
                 self.tiles[px][py].is_river = 1
 
     def compute_biomes(self) -> None:
+        self.biome_array = np.empty((self.height, self.width), dtype=object)
         for x in range(self.width):
             for y in range(self.height):
                 tile = self.tiles[x][y]
@@ -329,6 +328,7 @@ class World:
                     self.temperature_map[y, x],
                     self.humidity_map[y, x],
                 )
+                self.biome_array[y, x] = tile.biome
 
     def generate_resources(self) -> None:
         for x in range(self.width):
@@ -381,9 +381,7 @@ class World:
     def biome_map(self) -> np.ndarray:
         """Returns RGB image of shape (height, width, 3) ready for imshow."""
         color_array = np.zeros((self.height, self.width, 3))
-        for x in range(self.width):
-            for y in range(self.height):
-                biome = self.tiles[x][y].biome
-                r, g, b = colors[biome]
-                color_array[y, x] = [r / 255, g / 255, b / 255]
+        for biome_name, (r, g, b) in colors.items():
+            mask = self.biome_array == biome_name
+            color_array[mask] = [r / 255, g / 255, b / 255]
         return color_array

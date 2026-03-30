@@ -19,6 +19,7 @@ class Tribe:
         self.known_good_spots: dict[
             tuple[int, int], float
         ] = {}  # (x,y) -> habitability
+        self._cached_border: list | None = None
 
     def spawn(self) -> tuple[int, int]:
         # argwhere on (height, width) returns (row, col) = (y, x)
@@ -30,10 +31,18 @@ class Tribe:
         self.population = np.random.lognormal(mean=3.0 + 0.1 * habit, sigma=0.4)
         return x, y
 
+    def _territory_coords(self) -> tuple[np.ndarray, np.ndarray]:
+        """Returns (xs, ys) numpy arrays for the current territory."""
+        if not self.territory:
+            return np.array([], dtype=int), np.array([], dtype=int)
+        arr = np.array(list(self.territory), dtype=int)
+        return arr[:, 0], arr[:, 1]
+
     def step(self, year: int, all_tribes: list["Tribe"]) -> None:
         """Called once per year. Order matters: resources first, then decisions."""
         if not self.alive:
             return
+        self._cached_border = None
         self.migrate()
         self.get_resources()  # collect this year's resources before any decisions
         self.population_growth()  # sees fresh food from this year
@@ -115,34 +124,37 @@ class Tribe:
                         and random.random() < 0.4
                     ):
                         self.territory = {(cx, cy)}
+                        self._cached_border = None
             return
         attachment = 1.0 + current_habit * 0.3
         p = min(1.0, (gain / attachment) * 1.5)
         if random.random() < p:
             self.territory = {(bx, by)}
+            self._cached_border = None
 
     def _carrying_capacity(self) -> float:
         """Sum of habitability over owned tiles, scaled by HAB_THRESHOLD."""
-        return max(
-            1.0,
-            sum(self.world.habitability_map[y, x] for x, y in self.territory)
-            * HAB_THRESHOLD,
-        )
+        xs, ys = self._territory_coords()
+        if len(xs) == 0:
+            return 1.0
+        return max(1.0, float(self.world.habitability_map[ys, xs].sum()) * HAB_THRESHOLD)
 
     def _border_tiles(self) -> list[tuple[int, int]]:
         """All land tiles adjacent to the territory but not yet owned."""
+        if self._cached_border is not None:
+            return self._cached_border
         candidates = set()
         for x, y in self.territory:
             for nx, ny in self.world.tiles[x][y].neighbors(self.world):
                 if self.world.is_land[ny, nx] and (nx, ny) not in self.territory:
                     candidates.add((nx, ny))
-        return list(candidates)
+        self._cached_border = list(candidates)
+        return self._cached_border
 
     def population_growth(self) -> None:
         n = len(self.territory)
-        avg_hab = np.mean(
-            [self.world.habitability_map[y, x] for x, y in self.territory]
-        )
+        xs, ys = self._territory_coords()
+        avg_hab = float(self.world.habitability_map[ys, xs].mean()) if n > 0 else 0.0
         density = self.population / max(1, n)
 
         # Natality: base pre-modern rate + habitat quality + food surplus bonus
@@ -187,9 +199,11 @@ class Tribe:
             for _ in range(n_tiles):
                 if not border:
                     break
-                chosen = random.choice(border)
+                idx = random.randrange(len(border))
+                chosen = border[idx]
+                border[idx] = border[-1]
+                border.pop()
                 self.territory.add(chosen)
-                border.remove(chosen)
 
         # 2. Opportunistic expansion toward more fertile land
         avg_hab = K / (len(self.territory) * HAB_THRESHOLD)
@@ -280,9 +294,10 @@ class Tribe:
         self.resources[ResourceType.WATER.value] = 0
         self.resources[ResourceType.FOOD.value] = 0
         # Accumulables (stone, iron, gold, wood): keep existing stock, add this year's harvest
-        for x, y in self.territory:
-            for resource in [t.value for t in ResourceType]:
-                self.resources[resource] += self.world.resource_maps[resource][y, x]
+        xs, ys = self._territory_coords()
+        if len(xs) > 0:
+            for t in ResourceType:
+                self.resources[t.value] += float(self.world.resource_maps[t.value][ys, xs].sum())
         # Exploring to get more resources
         explored = self.exploration()
         for t in ResourceType:
