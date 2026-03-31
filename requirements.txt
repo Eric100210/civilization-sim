@@ -2,5 +2,4 @@ perlin_noise
 numpy
 matplotlib
 scipy
-heapq
 pytest
