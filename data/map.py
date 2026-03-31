@@ -33,8 +33,9 @@ class Tile:
     def __init__(self, x: int, y: int):
         self.x = x
         self.y = y
-        self.is_river = 0
-        self.biome = None
+        self.ownership = set()
+        self.is_river: int = 0
+        self.biome: str | None = None
 
     def compute_biome(
         self, elevation: float, temperature: float, humidity: float

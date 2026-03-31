@@ -16,6 +16,7 @@ class Tribe:
         self.technology: float = 0
         self.aggressiveness: float | None = None
         self.alive: bool = True
+        self.possible_war: Tribe | None = None
         self.known_good_spots: dict[
             tuple[int, int], float
         ] = {}  # (x,y) -> habitability
@@ -51,7 +52,7 @@ class Tribe:
         self.get_technology()
         self._check_extinction()
         # self.trade(all_tribes)
-        # self.war(all_tribes)
+        self.war(all_tribes)
 
     # ------------------------------------------------------------------
     # Actions
@@ -202,6 +203,8 @@ class Tribe:
                 idx = random.randrange(len(border))
                 chosen = border[idx]
                 border[idx] = border[-1]
+                if self.world.tiles[chosen[0]][chosen[1]].ownership:
+                    break
                 border.pop()
                 self.territory.add(chosen)
 
@@ -272,6 +275,11 @@ class Tribe:
 
             if not moved:
                 break  # blocked (ocean, map edge) — expedition ends early
+            
+            # possible war if enemy in exploration range
+            enemy = self.world.tiles[x][y].ownership
+            if enemy:
+                self.possible_war = enemy[0]
 
             for t in ResourceType:
                 harvest[t.value] += (
@@ -342,4 +350,9 @@ class Tribe:
         pass
 
     def war(self, all_tribes: list["Tribe"]) -> None:
-        pass
+        # war trigger : another tribe is close, enough resources,
+        # habitability is high, trade refused, and depend on aggressiveness
+        enemy = self.possible_war
+        if enemy: #simple logic for now
+            print("War") #ne s'affiche jamais même quand les populations se chevauchent... A corriger
+        
