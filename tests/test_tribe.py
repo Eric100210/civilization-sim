@@ -30,7 +30,7 @@ def world():
     np.random.seed(42)
     size = 100
     w = World(width=size, height=size, seed=1090)
-    w.generate(n_rivers=5, river_randomness=3)
+    w.generate(n_rivers=5, river_randomness=0.3)
     return w
 
 
@@ -41,22 +41,39 @@ def plain_tribe(world):
     y = 55
     tribe.territory = {(x, y)}
     habit = world.habitability_map[y, x]
-    tribe.population = np.random.lognormal(mean=3.0 + 0.1 * habit, sigma=0.4)
+    tribe.population = 100
     return tribe
 
+
+@pytest.fixture
+def mountain_tribe(world):
+    tribe = Tribe(world)
+    x = 95
+    y = 28
+    tribe.territory = {(x, y)}
+    tribe.population = 100
+    return tribe
+
+
+@pytest.fixture
+def snow_tribe(world):
+    tribe = Tribe(world)
+    x = 92
+    y = 42
+    tribe.territory = {(x, y)}
+    tribe.population = 100
+    return tribe
 
 # ---------------------------------------------------------------------------
 # Territorial invariants
 # ---------------------------------------------------------------------------
 
 
-def test_territory_never_shrinks_after_sedentarisation():
-    """Once sedentary, territory should only grow — expand() never removes tiles."""
-    pass
-
-
-def test_expand_never_adds_ocean_tile():
+def test_expand_never_adds_ocean_tile(world, plain_tribe):
     """expand() must only add land tiles — never ocean or out-of-bounds."""
+    plain_tribe.territory = {(24, 67)}
+    for i in range(100):
+        plain_tribe.step()
     pass
 
 
