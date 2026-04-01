@@ -43,14 +43,30 @@ class Simulation:
                 pop = int(tribe.population)
                 tiles = len(tribe.territory)
                 era = HISTORICAL_ERAS[tribe.hist_eras]["name"]
+
+                # Statut guerre
+                if tribe.at_war and tribe.war_enemy and tribe.war_enemy.alive:
+                    enemy_idx = self.tribes.index(tribe.war_enemy) + 1
+                    enemy_pop = int(tribe.war_enemy.population)
+                    war_line = (
+                        f"⚔ WAR vs T{enemy_idx}  "
+                        f"({pop:,} vs {enemy_pop:,})\n"
+                        f"  Year {tribe.war_duration}\n"
+                    )
+                elif tribe.truce_timer > 0:
+                    war_line = f"🕊 Truce ({tribe.truce_timer} yrs left)\n"
+                else:
+                    war_line = ""
+
                 text = (
                     f"── Tribe {i + 1} ──\n"
+                    f"{war_line}"
                     f"Era      : {era}\n"
                     f"Pop      : {pop:,}\n"
                     f"Surface  : {tiles} km²\n"
                     f"Birth    : {tribe.birth_rate:.4f}\n"
                     f"Death    : {tribe.death_rate:.4f}\n"
-                    f"Resources: {tribe.resources['iron']}\n"
+                    f"Iron     : {tribe.resources['iron']:.0f}\n"
                 )
             else:
                 text = f"── Tribe {i + 1} ──\n[extinct]"

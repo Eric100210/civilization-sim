@@ -33,7 +33,7 @@ class Tile:
     def __init__(self, x: int, y: int):
         self.x = x
         self.y = y
-        self.ownership = set()
+        self.owner = set()
         self.is_river: int = 0
         self.biome: str | None = None
 
