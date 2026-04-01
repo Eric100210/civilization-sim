@@ -10,9 +10,10 @@ Run with:  pytest tests/
 
 import pytest
 import random
+from unittest.mock import patch
 import numpy as np
 from data.map import World
-from data.tribe import Tribe
+from data.tribe import Tribe, HAB_THRESHOLD
 from data.resources import ResourceType
 
 
@@ -64,17 +65,36 @@ def snow_tribe(world):
     tribe.population = 100
     return tribe
 
+
+@pytest.fixture
+def full_resources():
+    resources = {r.value: 1000 for r in ResourceType}
+    return resources
+
+
+@pytest.fixture
+def no_resources():
+    resources = {r.value: 0 for r in ResourceType}
+    return resources
+
+
 # ---------------------------------------------------------------------------
 # Territorial invariants
 # ---------------------------------------------------------------------------
 
 
-def test_expand_never_adds_ocean_tile(world, plain_tribe):
+def test_expand_never_adds_ocean_tile(world, plain_tribe, full_resources):
     """expand() must only add land tiles — never ocean or out-of-bounds."""
-    plain_tribe.territory = {(24, 67)}
-    for i in range(100):
-        plain_tribe.step()
-    pass
+    plain_tribe.population = HAB_THRESHOLD * 10
+    plain_tribe.resources = full_resources
+
+    for year in range(100):
+        plain_tribe.expand()
+
+    for x, y in plain_tribe.territory:
+        assert 0 <= x < world.width, f"Tile ({x},{y}) is out of bounds"
+        assert 0 <= y < world.height, f"Tile ({x},{y}) is out of bounds"
+        assert world.is_land[y, x], f"Tile ({x},{y}) is ocean — should never be added"
 
 
 def test_expand_only_adds_adjacent_tiles():
@@ -126,9 +146,18 @@ def test_eat_does_not_kill_tribe_instantly():
 # ---------------------------------------------------------------------------
 
 
-def test_consumables_reset_each_year():
+def test_consumables_reset_each_year(plain_tribe):
     """water and food should be reset to 0 at the start of each get_resources() call."""
-    pass
+    # Artificially inflate consumables as if they had accumulated
+    plain_tribe.resources[ResourceType.WATER.value] = 9999
+    plain_tribe.resources[ResourceType.FOOD.value] = 9999
+
+    plain_tribe.get_resources()
+
+    # After get_resources(), water and food should reflect only this year's harvest,
+    # not the 9999 leftover — i.e. they were reset to 0 before collection
+    assert plain_tribe.resources[ResourceType.WATER.value] < 9999
+    assert plain_tribe.resources[ResourceType.FOOD.value] < 9999
 
 
 def test_accumulables_never_decrease_without_technology_unlock():
@@ -136,9 +165,12 @@ def test_accumulables_never_decrease_without_technology_unlock():
     pass
 
 
-def test_get_resources_returns_nonzero_on_plains():
+def test_get_resources_returns_nonzero_on_plains(plain_tribe):
     """A tribe on a plains tile should collect positive food and water each year."""
-    pass
+    plain_tribe.get_resources()
+
+    assert plain_tribe.resources[ResourceType.FOOD.value] > 0
+    assert plain_tribe.resources[ResourceType.WATER.value] > 0
 
 
 # ---------------------------------------------------------------------------
@@ -214,11 +246,29 @@ def test_exploration_returns_zero_harvest_if_no_border():
 # ---------------------------------------------------------------------------
 
 
-def test_extinct_tribe_does_not_step():
-    """A tribe with alive=False should not modify any state when step() is called."""
-    pass
-
-
-def test_extinction_triggered_below_threshold():
+def test_extinction_triggered_below_threshold(plain_tribe):
     """_check_extinction() should set alive=False when population < 5."""
-    pass
+    plain_tribe.population = 4.9
+    plain_tribe._check_extinction()
+
+    assert plain_tribe.alive is False
+    assert plain_tribe.population == 0.0
+    assert plain_tribe.territory == set()
+
+
+def test_extinct_tribe_does_not_step(plain_tribe):
+    """A tribe with alive=False should return immediately without calling any method."""
+    plain_tribe.alive = False
+
+    with (
+        patch.object(plain_tribe, "migrate") as mock_migrate,
+        patch.object(plain_tribe, "get_resources") as mock_resources,
+        patch.object(plain_tribe, "population_growth") as mock_growth,
+        patch.object(plain_tribe, "expand") as mock_expand,
+    ):
+        plain_tribe.step(year=0, all_tribes=[])
+
+        mock_migrate.assert_not_called()
+        mock_resources.assert_not_called()
+        mock_growth.assert_not_called()
+        mock_expand.assert_not_called()
