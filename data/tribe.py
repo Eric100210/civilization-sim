@@ -303,7 +303,16 @@ class Tribe:
                 if other is not self and other.alive:
                     self.nearby_enemies.add(other)
             # Vérifier aussi les 8 voisins : si l'un appartient à une autre tribu, on la détecte
-            for dx2, dy2 in [(-1,0),(1,0),(0,-1),(0,1),(-1,-1),(-1,1),(1,-1),(1,1)]:
+            for dx2, dy2 in [
+                (-1, 0),
+                (1, 0),
+                (0, -1),
+                (0, 1),
+                (-1, -1),
+                (-1, 1),
+                (1, -1),
+                (1, 1),
+            ]:
                 nx2, ny2 = x + dx2, y + dy2
                 if 0 <= nx2 < self.world.width and 0 <= ny2 < self.world.height:
                     for other in self.world.tiles[nx2][ny2].owner:
@@ -379,6 +388,25 @@ class Tribe:
             for x, y in self.territory:
                 self.world.tiles[x][y].owner.discard(self)
             self.territory = set()
+            # Si on mourait en pleine guerre, libérer l'ennemi et invalider son cache
+            if self.at_war and self.war_enemy:
+                enemy = self.war_enemy
+                # Le vainqueur absorbe 20-40% de la population restante (assimilation)
+                absorbed = self.population * random.uniform(0.20, 0.40)
+                enemy.population += absorbed
+                print(
+                    f"[Guerre] Extinction — {int(absorbed):,} habitants absorbés "
+                    f"par le vainqueur (pop vainqueur : {int(enemy.population):,})"
+                )
+                enemy.at_war = False
+                enemy.war_enemy = None
+                enemy.war_duration = 0
+                enemy.war_pop_start = 0.0
+                enemy.war_ter_start = 0
+                enemy.truce_timer = 0  # pas de trêve : on a gagné
+                enemy._cached_border = None  # forcer recalcul du territoire
+            self.at_war = False
+            self.war_enemy = None
 
     def _war_temptation(self, enemy: "Tribe") -> float:
         """
@@ -392,20 +420,21 @@ class Tribe:
           + trade_refused_bonus   : +0.25 si l'ennemi a refusé le commerce
           - size_ratio_penalty    : on évite les tribus 3x plus grandes
         """
-        # Richesse de l'ennemi (ressources accumulables normalisées)
+        # Richesse de l'ennemi : normalisée par sa propre population pour éviter
+        # la saturation avec les grandes tribus (ratio ressources/habitant)
         enemy_wealth = (
             enemy.resources[ResourceType.IRON.value]
             + enemy.resources[ResourceType.GOLD.value]
             + enemy.resources[ResourceType.STONE.value]
         )
-        enemy_resource_score = min(1.0, enemy_wealth / 500.0)
+        enemy_wealth_per_capita = enemy_wealth / max(1.0, enemy.population)
+        enemy_resource_score = min(1.0, enemy_wealth_per_capita / 2.0)
 
-        # Stabilité propre : si on a beaucoup de ressources, moins de raison d'attaquer
-        own_wealth = (
-            self.resources[ResourceType.FOOD.value]
-            + self.resources[ResourceType.WATER.value] * 10
+        # Stabilité propre : ratio nourriture/population (pas valeur brute)
+        own_food_per_capita = self.resources[ResourceType.FOOD.value] / max(
+            1.0, self.population
         )
-        own_stability = min(1.0, own_wealth / 1000.0)
+        own_stability = min(1.0, own_food_per_capita / 5.0)
 
         # Gain d'habitabilité : moyenne de leur territoire vs le nôtre
         if enemy.territory:
@@ -419,7 +448,8 @@ class Tribe:
         own_avg_hab = (
             float(self.world.habitability_map[ys, xs].mean()) if len(xs) > 0 else 0.0
         )
-        hab_gain = max(0.0, (enemy_avg_hab - own_avg_hab) / 2.0)  # normalisé 0–1
+        # Normalisé sur une plage réaliste d'habitabilité (0–3)
+        hab_gain = max(0.0, (enemy_avg_hab - own_avg_hab) / 3.0)
 
         # Bonus si commerce refusé
         trade_bonus = 0.25 if self.trade_refused else 0.0
@@ -429,12 +459,14 @@ class Tribe:
         size_penalty = min(0.6, max(0.0, (size_ratio - 1.5) * 0.3))
 
         score = (
-            self.aggressiveness * 0.35
-            + enemy_resource_score * 0.25
-            - own_stability * 0.15
-            + hab_gain * 0.20
-            + trade_bonus
-            - size_penalty
+            self.aggressiveness
+            * 0.50  # 0.05–0.45  → dominant, garantit presque toujours > seuil
+            + enemy_resource_score * 0.15  # 0–0.15
+            - own_stability
+            * 0.10  # 0–-0.10  → faible impact, la stabilité ne freine pas la guerre
+            + hab_gain * 0.10  # 0–0.10
+            + trade_bonus  # 0 ou 0.25  → si pas de commerce, grosse pénalité
+            - size_penalty  # 0–-0.60  → seule vraie raison de ne pas attaquer
         )
         return float(np.clip(score, 0.0, 1.0))
 
@@ -468,11 +500,17 @@ class Tribe:
             alpha = 0.008 + self.hist_eras * 0.004  # efficacité de self
             beta = 0.008 + enemy.hist_eras * 0.004  # efficacité de enemy
 
-            losses_self = beta * enemy.population * 0.01
-            losses_enemy = alpha * self.population * 0.01
+            losses_self = beta * enemy.population
+            losses_enemy = alpha * self.population
 
             self.population = max(0.0, self.population - losses_self)
             enemy.population = max(0.0, enemy.population - losses_enemy)
+
+            print(
+                f"  [An {self.war_duration}] "
+                f"T1 pop={int(self.population):,} (-{int(losses_self):,})  "
+                f"T2 pop={int(enemy.population):,} (-{int(losses_enemy):,})"
+            )
 
             # --- Avance du front : le vainqueur du tour prend 2-3 tiles ---
             # Le vainqueur du tour = celui qui a infligé le plus de pertes
@@ -492,21 +530,32 @@ class Tribe:
             pop_lost_self = 1.0 - self.population / max(1.0, self.war_pop_start)
             pop_lost_enemy = 1.0 - enemy.population / max(1.0, enemy.war_pop_start)
 
-            TERRITORY_SURRENDER = 0.25  # capitulation à 25% de territoire perdu
-            EXHAUSTION_THRESHOLD = 0.30  # armistice si 30% de pop perdue
-            MAX_WAR_YEARS = 15
+            TERRITORY_SURRENDER = 0.25  # capitulation : un camp perd ≥25% de territoire
+            EXHAUSTION_THRESHOLD = 0.30  # armistice : les DEUX perdent ≥30% de pop
+            COLLAPSE_THRESHOLD = 0.30  # effondrement rapide : ≥30% de pop en ≤5 ans
+            COLLAPSE_YEARS = 5  # fenêtre de temps pour l'effondrement rapide
+            MAX_WAR_YEARS = 40  # timeout de sécurité
 
             capitulation = (
                 territory_lost_self >= TERRITORY_SURRENDER
                 or territory_lost_enemy >= TERRITORY_SURRENDER
             )
+            # Exhaustion : les DEUX camps épuisés (cas rare)
             exhaustion = (
                 pop_lost_self >= EXHAUSTION_THRESHOLD
                 and pop_lost_enemy >= EXHAUSTION_THRESHOLD
             )
+            # Effondrement rapide : un camp s'effondre vite → la guerre continue jusqu'à extinction
+            # On ne met pas fin ici, _check_extinction() s'en chargera naturellement
+            rapid_collapse = self.war_duration <= COLLAPSE_YEARS and (
+                pop_lost_self >= COLLAPSE_THRESHOLD
+                or pop_lost_enemy >= COLLAPSE_THRESHOLD
+            )
             timeout = self.war_duration >= MAX_WAR_YEARS
 
-            if capitulation or exhaustion or timeout:
+            # En cas d'effondrement rapide, on ne stoppe pas la guerre :
+            # la tribu qui s'effondre mourra via _check_extinction()
+            if not rapid_collapse and (capitulation or exhaustion or timeout):
                 self._resolve_war(enemy, capitulation, exhaustion)
 
             self.nearby_enemies.clear()
@@ -527,7 +576,7 @@ class Tribe:
                 best_score = score
                 best_enemy = candidate
 
-        WAR_THRESHOLD = 0.55
+        WAR_THRESHOLD = 0.25
         if best_enemy is not None and best_score >= WAR_THRESHOLD:
             # Initialisation de la guerre pour les deux camps
             for tribe, opp in ((self, best_enemy), (best_enemy, self)):
@@ -550,11 +599,17 @@ class Tribe:
         """
         Fin de guerre selon la cause :
           - Capitulation (≥25% territoire perdu) : le perdant cède + pillage
-          - Exhaustion mutuelle                  : armistice, pas de cession
-          - Timeout                              : armistice léger
+          - Exhaustion mutuelle (les deux ≥30%)  : armistice, pas de cession (cas rare)
+          - Timeout (40 ans)                     : armistice léger
+          Note : effondrement rapide (≥30% en ≤5 ans) → pas appelé ici,
+                 la tribu s'éteint naturellement via _check_extinction()
         """
         ter_lost_self = 1.0 - len(self.territory) / max(1, self.war_ter_start)
         ter_lost_enemy = 1.0 - len(enemy.territory) / max(1, enemy.war_ter_start)
+
+        # Pertes totales depuis le début de la guerre
+        total_dead_self = int(self.war_pop_start - self.population)
+        total_dead_enemy = int(enemy.war_pop_start - enemy.population)
 
         if capitulation:
             # Le plus grand perdant territorial est le vaincu
@@ -562,21 +617,33 @@ class Tribe:
                 loser, winner = self, enemy
             else:
                 loser, winner = enemy, self
-            # Pillage proportionnel à l'ampleur de la victoire
             pillage_pct = min(0.50, 0.20 + (ter_lost_self - ter_lost_enemy) * 0.5)
             self._pillage(winner, loser, pct=pillage_pct)
+            # Le vainqueur absorbe 10-20% de la population du perdant (assimilation partielle)
+            absorbed = loser.population * random.uniform(0.10, 0.20)
+            loser.population -= absorbed
+            winner.population += absorbed
             truce_duration = random.randint(8, 20)
             print(
-                f"[Guerre] Capitulation — perdant a cédé "
-                f"{max(ter_lost_self, ter_lost_enemy) * 100:.0f}% de son territoire. "
-                f"Trêve {truce_duration} ans."
+                f"[Guerre] Capitulation après {self.war_duration} ans — "
+                f"territoire cédé : {max(ter_lost_self, ter_lost_enemy) * 100:.0f}%\n"
+                f"  Pertes T1 : {total_dead_self:,} morts "
+                f"({ter_lost_self * 100:.0f}% territoire)\n"
+                f"  Pertes T2 : {total_dead_enemy:,} morts "
+                f"({ter_lost_enemy * 100:.0f}% territoire)\n"
+                f"  Assimilation : {int(absorbed):,} habitants transférés au vainqueur\n"
+                f"  Trêve {truce_duration} ans."
             )
         else:
-            # Exhaustion ou timeout : armistice symétrique
             truce_duration = random.randint(15, 30)
             print(
                 f"[Guerre] Armistice ({'exhaustion' if exhaustion else 'timeout'}) "
-                f"après {self.war_duration} ans. Trêve {truce_duration} ans."
+                f"après {self.war_duration} ans\n"
+                f"  Pertes T1 : {total_dead_self:,} morts "
+                f"({ter_lost_self * 100:.0f}% territoire)\n"
+                f"  Pertes T2 : {total_dead_enemy:,} morts "
+                f"({ter_lost_enemy * 100:.0f}% territoire)\n"
+                f"  Trêve {truce_duration} ans."
             )
 
         # Reset état de guerre pour les deux
@@ -602,17 +669,31 @@ class Tribe:
         """
         if not loser.territory:
             return
-        # Tiles du perdant adjacentes au territoire du vainqueur (zone de contact)
+        # Tiles du perdant directement adjacentes au territoire du vainqueur.
+        # On ne prend QUE ces tiles pour garantir la contiguïté du territoire vainqueur.
+        winner_set = winner.territory
         contact = [
             (x, y)
             for (x, y) in loser.territory
             if any(
-                (nx, ny) in winner.territory
+                (nx, ny) in winner_set
                 for nx, ny in self.world.tiles[x][y].neighbors(self.world)
             )
         ]
         if not contact:
-            contact = list(loser.territory)  # fallback : tiles quelconques
+            # Fallback : les territoires ne se touchent pas encore (début de guerre),
+            # on prend la tile du perdant la plus proche du centroïde du vainqueur
+            if winner_set:
+                wx = sum(x for x, y in winner_set) / len(winner_set)
+                wy = sum(y for x, y in winner_set) / len(winner_set)
+                contact = [
+                    min(
+                        loser.territory,
+                        key=lambda t: (t[0] - wx) ** 2 + (t[1] - wy) ** 2,
+                    )
+                ]
+            else:
+                contact = list(loser.territory)
 
         if n is not None:
             n_transfer = min(n, len(contact))
