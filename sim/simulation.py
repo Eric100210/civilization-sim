@@ -6,7 +6,11 @@ import matplotlib.animation as animation
 import numpy as np
 
 
-TRIBE_COLORS = ["#640C0C", "#3F250C", "#774F1A"]
+TRIBE_COLORS = ["#640C0C", "#3F250C", "#774F1A", "#0C3F64", "#4B0C64", "#0C6440"]
+
+
+def tribe_color(i: int) -> str:
+    return TRIBE_COLORS[i % len(TRIBE_COLORS)]
 
 
 class Simulation:
@@ -93,7 +97,7 @@ class Simulation:
         for i, tribe in enumerate(self.tribes):
             xs = [x for x, y in tribe.territory]
             ys = [y for x, y in tribe.territory]
-            sc = self.ax.scatter(xs, ys, c=TRIBE_COLORS[i], s=4, zorder=3, alpha=0.6)
+            sc = self.ax.scatter(xs, ys, c=tribe_color(i), s=4, zorder=3, alpha=0.6)
             self.scatters.append(sc)
 
         # One text block per tribe in the right panel, stacked vertically
@@ -110,7 +114,7 @@ class Simulation:
                 va="top",
                 fontsize=10,
                 family="monospace",
-                color=TRIBE_COLORS[i],
+                color=tribe_color(i),
             )
             self.pop_texts.append(txt)
 

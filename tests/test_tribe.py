@@ -256,6 +256,118 @@ def test_extinction_triggered_below_threshold(plain_tribe):
     assert plain_tribe.territory == set()
 
 
+def test_war_extinction_absorbs_population(world):
+    """When a tribe dies during a war, the victor must absorb 20-40% of the
+    remaining population (regression: absorbed was computed after zeroing pop)."""
+    winner = Tribe(world)
+    loser = Tribe(world)
+    winner.territory = {(10, 10)}
+    winner.population = 1000.0
+    loser.territory = {(12, 10)}
+    loser.population = 4.0
+    for tribe, opp in ((winner, loser), (loser, winner)):
+        tribe.at_war = True
+        tribe.war_enemy = opp
+        tribe.war_pop_start = tribe.population
+        tribe.war_ter_start = len(tribe.territory)
+
+    loser._check_extinction()
+
+    assert loser.alive is False
+    assert winner.population > 1000.0  # absorbed 0.8–1.6 people, never 0
+    assert winner.at_war is False
+    assert winner.war_enemy is None
+
+
+def test_relocate_updates_tile_ownership(world):
+    """Nomadic migration must move tile ownership along with the territory
+    (regression: the old tile stayed owned forever, the new one never was)."""
+    tribe = Tribe(world)
+    x, y = tribe.spawn()
+
+    nx, ny = x + 1, y
+    tribe._relocate(nx, ny)
+
+    assert tribe not in world.tiles[x][y].owner
+    assert tribe in world.tiles[nx][ny].owner
+    assert tribe.territory == {(nx, ny)}
+
+
+def test_expand_triggers_before_full_saturation(world, plain_tribe):
+    """A tribe nearing (but below) carrying capacity should still bud off new
+    tiles — waiting for pressure > 1.0 deadlocks growth against density deaths."""
+    tribe = plain_tribe
+    x, y = next(iter(tribe.territory))
+    world.tiles[x][y].owner.add(tribe)
+    K = tribe._carrying_capacity()
+    tribe.population = max(HAB_THRESHOLD, K * 0.9)
+
+    for _ in range(20):
+        tribe.expand()
+
+    assert len(tribe.territory) > 1
+
+
+def test_expand_targets_missing_era_resources(world):
+    """A tribe lacking iron for its next era should eventually colonize an
+    adjacent iron-bearing tile even though it is less habitable."""
+    iron_map = world.resource_maps[ResourceType.IRON.value]
+    tribe = None
+    for y in range(world.height):
+        for x in range(world.width):
+            if iron_map[y, x] > 0 and world.is_land[y, x]:
+                for nx, ny in world.tiles[x][y].neighbors(world):
+                    if world.is_land[ny, nx] and iron_map[ny, nx] == 0:
+                        tribe = Tribe(world)
+                        tribe.territory = {(nx, ny)}
+                        world.tiles[nx][ny].owner.add(tribe)
+                        tribe.population = float(HAB_THRESHOLD)
+                        tribe.hist_eras = 1  # next era (Bronze) requires iron
+                        break
+            if tribe:
+                break
+        if tribe:
+            break
+    assert tribe is not None, "fixture world has no iron tile with a land neighbour"
+
+    for _ in range(100):
+        tribe._cached_border = None
+        tribe.expand()
+
+    assert any(iron_map[ty, tx] > 0 for tx, ty in tribe.territory)
+
+
+def test_one_sided_war_ends_in_capitulation(world):
+    """A hopeless war (one side bleeding, the other intact) must end in
+    capitulation well before the 40-year timeout, not grind to annihilation."""
+    strong = Tribe(world)
+    weak = Tribe(world)
+    strong.territory = {(20 + dx, 20 + dy) for dx in range(10) for dy in range(10)}
+    weak.territory = {(30 + dx, 20 + dy) for dx in range(5) for dy in range(5)}
+    for t in (strong, weak):
+        for tx, ty in t.territory:
+            world.tiles[tx][ty].owner.add(t)
+    strong.population = 100_000.0
+    weak.population = 6_000.0
+    for tribe, opp in ((strong, weak), (weak, strong)):
+        tribe.at_war = True
+        tribe.war_enemy = opp
+        tribe.war_pop_start = tribe.population
+        tribe.war_ter_start = len(tribe.territory)
+
+    weak_pop_start = weak.population
+    for _ in range(20):
+        strong.war([strong, weak])
+        weak.war([strong, weak])
+        if not strong.at_war:
+            break
+
+    assert strong.at_war is False, "war should have ended by capitulation"
+    assert weak.at_war is False
+    assert strong.truce_timer > 0 and weak.truce_timer > 0
+    assert weak.population < weak_pop_start
+
+
 def test_extinct_tribe_does_not_step(plain_tribe):
     """A tribe with alive=False should return immediately without calling any method."""
     plain_tribe.alive = False

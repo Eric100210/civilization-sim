@@ -140,14 +140,21 @@ class Tribe:
                         and self.world.is_land[cy, cx]
                         and random.random() < 0.4
                     ):
-                        self.territory = {(cx, cy)}
-                        self._cached_border = None
+                        self._relocate(cx, cy)
             return
         attachment = 1.0 + current_habit * 0.3
         p = min(1.0, (gain / attachment) * 1.5)
         if random.random() < p:
-            self.territory = {(bx, by)}
-            self._cached_border = None
+            self._relocate(bx, by)
+
+    def _relocate(self, x: int, y: int) -> None:
+        """Move the whole (nomadic) tribe to a single tile, keeping the
+        tile ownership registry in sync with the territory."""
+        for ox, oy in self.territory:
+            self.world.tiles[ox][oy].owner.discard(self)
+        self.territory = {(x, y)}
+        self.world.tiles[x][y].owner.add(self)
+        self._cached_border = None
 
     def _carrying_capacity(self) -> float:
         """Sum of habitability over owned tiles, scaled by HAB_THRESHOLD."""
@@ -189,15 +196,24 @@ class Tribe:
         r = self.birth_rate - self.death_rate
         self.population = max(1.0, self.population * (1 + r))
 
+    # Tribes start budding off settlements before full saturation: density
+    # deaths and food shortage cap population right around K, so waiting for
+    # pressure > 1.0 deadlocks growth (the tribe stagnates instead of spreading).
+    EXPANSION_PRESSURE = 0.75
+
     def expand(self) -> None:
         """
-        Two mechanisms of territorial expansion:
+        Three mechanisms of territorial expansion:
 
-        1. PRESSURE — overpopulation (P > K): the tribe must expand to survive.
-           Number of new tiles ~ Poisson(pressure - 1).
+        1. PRESSURE — approaching carrying capacity (P > 0.75·K): groups bud
+           off to new land. Number of new tiles ~ Poisson(2·(pressure - 0.75)).
 
         2. OPPORTUNISTIC — even without pressure, the tribe slowly colonizes
            adjacent tiles that are significantly more fertile than its current average.
+
+        3. NEED-DRIVEN — border tiles holding a resource still missing for the
+           next era unlock (e.g. mountains for iron) get colonized even if they
+           are less habitable.
         """
         if not self.territory:
             return
@@ -213,8 +229,8 @@ class Tribe:
             return
 
         # 1. Pressure-driven expansion
-        if pressure > 1.0:
-            n_tiles = np.random.poisson(lam=pressure - 1.0)
+        if pressure > self.EXPANSION_PRESSURE:
+            n_tiles = np.random.poisson(lam=(pressure - self.EXPANSION_PRESSURE) * 2.0)
             for _ in range(n_tiles):
                 if not border:
                     break
@@ -235,6 +251,25 @@ class Tribe:
                 if not self.world.tiles[nx][ny].owner:
                     self.territory.add((nx, ny))
                     self.world.tiles[nx][ny].owner.add(self)
+
+        # 3. Need-driven expansion toward resources missing for the next era
+        next_era = self.hist_eras + 1
+        if next_era in HISTORICAL_ERAS:
+            missing = [
+                t
+                for t, qty in HISTORICAL_ERAS[next_era]["unlock"].items()
+                if self.resources[t.value] < qty
+            ]
+            if missing:
+                for nx, ny in border:
+                    if self.world.tiles[nx][ny].owner:
+                        continue
+                    has_needed = any(
+                        self.world.resource_maps[t.value][ny, nx] > 0 for t in missing
+                    )
+                    if has_needed and random.random() < 0.10:
+                        self.territory.add((nx, ny))
+                        self.world.tiles[nx][ny].owner.add(self)
 
     def exploration(self) -> dict[str, int | float]:
         """
@@ -382,6 +417,7 @@ class Tribe:
     def _check_extinction(self) -> None:
         """Mark tribe extinct if population falls below minimum viable threshold."""
         if self.population < 5:
+            pop_remaining = self.population
             self.alive = False
             self.population = 0.0
             # Release ownership of all tiles
@@ -392,7 +428,7 @@ class Tribe:
             if self.at_war and self.war_enemy:
                 enemy = self.war_enemy
                 # Le vainqueur absorbe 20-40% de la population restante (assimilation)
-                absorbed = self.population * random.uniform(0.20, 0.40)
+                absorbed = pop_remaining * random.uniform(0.20, 0.40)
                 enemy.population += absorbed
                 print(
                     f"[Guerre] Extinction — {int(absorbed):,} habitants absorbés "
@@ -512,14 +548,20 @@ class Tribe:
                 f"T2 pop={int(enemy.population):,} (-{int(losses_enemy):,})"
             )
 
-            # --- Avance du front : le vainqueur du tour prend 2-3 tiles ---
-            # Le vainqueur du tour = celui qui a infligé le plus de pertes
+            # --- Avance du front : le vainqueur du tour prend des tiles ---
+            # Le vainqueur du tour = celui qui a infligé le plus de pertes.
+            # L'avance est proportionnelle au territoire du perdant (~1%/an) :
+            # avec un front fixe de 2-3 tiles, le seuil de capitulation (25%)
+            # était inatteignable pour les grands empires et toutes les guerres
+            # duraient 40 ans jusqu'à l'annihilation.
             if losses_enemy > losses_self:
                 attacker, defender = self, enemy
             else:
                 attacker, defender = enemy, self
 
-            n_tiles_front = random.randint(2, 3)
+            n_tiles_front = max(
+                2, int(len(defender.territory) * random.uniform(0.008, 0.015))
+            )
             self._transfer_border_tiles(attacker, defender, pct=None, n=n_tiles_front)
 
             # --- Conditions de fin ---
@@ -536,9 +578,18 @@ class Tribe:
             COLLAPSE_YEARS = 5  # fenêtre de temps pour l'effondrement rapide
             MAX_WAR_YEARS = 40  # timeout de sécurité
 
+            # Capitulation démographique : un camp saigné (≥50% de pertes)
+            # face à un adversaire presque intact (<20%) abandonne la lutte
+            ONE_SIDED_LOSS = 0.50
+            ONE_SIDED_INTACT = 0.20
+            one_sided = (
+                pop_lost_self >= ONE_SIDED_LOSS and pop_lost_enemy < ONE_SIDED_INTACT
+            ) or (pop_lost_enemy >= ONE_SIDED_LOSS and pop_lost_self < ONE_SIDED_INTACT)
+
             capitulation = (
                 territory_lost_self >= TERRITORY_SURRENDER
                 or territory_lost_enemy >= TERRITORY_SURRENDER
+                or one_sided
             )
             # Exhaustion : les DEUX camps épuisés (cas rare)
             exhaustion = (

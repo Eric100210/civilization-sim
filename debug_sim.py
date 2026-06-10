@@ -2,6 +2,7 @@
 Diagnostic script: run simulation headless and log key metrics each year
 to understand why tribes go extinct around year 500.
 """
+
 import sys
 import random
 import numpy as np
@@ -31,7 +32,9 @@ for _ in range(params["NB_TRIBES"]):
     tribe.spawn()
     tribes.append(tribe)
 
-print(f"{'Year':>5} | {'Tribe':>5} | {'Pop':>14} | {'Tiles':>6} | {'BirthR':>8} | {'DeathR':>8} | {'Food':>12} | {'Water':>10} | {'W_need':>8} | {'F_need':>8} | {'Era':>10}")
+print(
+    f"{'Year':>5} | {'Tribe':>5} | {'Pop':>14} | {'Tiles':>6} | {'BirthR':>8} | {'DeathR':>8} | {'Food':>12} | {'Water':>10} | {'W_need':>8} | {'F_need':>8} | {'Era':>10}"
+)
 print("-" * 130)
 
 for year in range(1, params["NB_YEARS"] + 1):
@@ -41,7 +44,9 @@ for year in range(1, params["NB_YEARS"] + 1):
             continue
 
         # --- replicate tribe.step() but with logging ---
-        tribe.migrate()
+        tribe._cached_border = None
+        if not tribe.at_war:
+            tribe.migrate()
         tribe.get_resources()
 
         food = tribe.resources["food"]
@@ -52,7 +57,8 @@ for year in range(1, params["NB_YEARS"] + 1):
         tribe.population_growth()
         pop_after_growth = tribe.population
 
-        tribe.expand()
+        if not tribe.at_war:
+            tribe.expand()
 
         # compute what eat() will do BEFORE calling it
         water_needed = int(tribe.population / 100)
@@ -63,6 +69,7 @@ for year in range(1, params["NB_YEARS"] + 1):
         tribe.eat()
         tribe.get_technology()
         tribe._check_extinction()
+        tribe.war(tribes)
 
         # Log every 10 years or when something alarming happens
         alarming = (
@@ -74,7 +81,7 @@ for year in range(1, params["NB_YEARS"] + 1):
         if year % 10 == 0 or alarming:
             status = "[EXTINCT]" if not tribe.alive else ""
             print(
-                f"{year:>5} | T{i+1:>4} | {pop_before_growth:>14,.1f} | {tiles:>6} | "
+                f"{year:>5} | T{i + 1:>4} | {pop_before_growth:>14,.1f} | {tiles:>6} | "
                 f"{tribe.birth_rate:>8.4f} | {tribe.death_rate:>8.4f} | "
                 f"{food:>12,.1f} | {water:>10,.1f} | "
                 f"{water_needed:>8,} | {food_needed:>8,} | "
